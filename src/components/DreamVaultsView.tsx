@@ -12,10 +12,14 @@ import {
   X,
   CheckCircle2,
   Landmark,
+  ChevronDown,
+  ChevronUp,
+  ReceiptText,
 } from 'lucide-react';
-import { DreamVault, WalletAccount } from '../types/finance';
+import { DreamVault, TransactionRecord, WalletAccount } from '../types/finance';
 import {
   calculateDreamTargetDateFromMonthly,
+  isPureInvestmentVault,
   resolveFlexibleLabel,
   verifySecretAgainstStoredHash,
 } from '../utils/financeRules';
@@ -33,6 +37,7 @@ import { InfoTip } from './InfoTip';
 interface DreamVaultsViewProps {
   dreamVaults: DreamVault[];
   accounts: WalletAccount[];
+  transactions?: TransactionRecord[];
   currency: string;
   isAdminPortal: boolean;
   readOnlyMode?: boolean;
@@ -94,6 +99,7 @@ function generateDefaultDreamThumbnailSvg(name: string, storageType: string): st
 export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
   dreamVaults,
   accounts,
+  transactions = [],
   currency,
   isAdminPortal,
   readOnlyMode = false,
@@ -104,6 +110,10 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
   onDeleteDreamVault,
   onContributeToDreamVault,
 }) => {
+  // Two Sections: Left = 'investment' (Default), Right = 'dreams'
+  const [activeSectionTab, setActiveSectionTab] = useState<'investment' | 'dreams'>('investment');
+  const [expandedCardId, setExpandedCardId] = useState<string | null>(null);
+
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingVaultId, setEditingVaultId] = useState<string | null>(null);
 
@@ -114,7 +124,7 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
 
   const [name, setName] = useState('');
   const [storageType, setStorageType] =
-    useState<DreamVault['storageType']>('Dream Investment');
+    useState<DreamVault['storageType']>('Fixed Deposit (FD)');
   const [customStorageType, setCustomStorageType] = useState('');
   const [savedInAccountId, setSavedInAccountId] = useState<string>(
     savingsOnlyAccounts[0]?.id || ''
@@ -147,9 +157,38 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
     ? 'bg-rose-600 hover:bg-rose-500 text-white'
     : 'bg-emerald-600 hover:bg-emerald-500 text-white';
 
-  const totalDreamSaved = dreamVaults.reduce((s, v) => s + v.currentAmount, 0);
-  const totalDreamTarget = dreamVaults.reduce((s, v) => s + v.targetAmount, 0);
-  const totalMonthlyPlanned = dreamVaults.reduce((s, v) => s + v.monthlyPlannedContribution, 0);
+  // Split cards into Left (Investment) and Right (Dreams)
+  const investmentCards = dreamVaults.filter((v) => isPureInvestmentVault(v));
+  const dreamGoalCards = dreamVaults.filter((v) => !isPureInvestmentVault(v));
+
+  // Investment Section Summary Totals
+  const totalInvestmentSaved = investmentCards.reduce(
+    (s, v) => s + Math.max(0, Number(v.currentAmount) || 0),
+    0
+  );
+  const totalInvestmentTarget = investmentCards.reduce(
+    (s, v) => s + Math.max(0, Number(v.targetAmount) || 0),
+    0
+  );
+  const fdCardsInInvestment = investmentCards.filter(
+    (v) =>
+      v.storageType === 'Fixed Deposit (FD)' ||
+      (v.storageType === 'Other' && /\bfd\b|fixed deposit/i.test(v.customStorageType || ''))
+  );
+  const totalFdSavedInInvestment = fdCardsInInvestment.reduce(
+    (s, v) => s + Math.max(0, Number(v.currentAmount) || 0),
+    0
+  );
+
+  // Dreams Section Summary Totals
+  const totalDreamsSaved = dreamGoalCards.reduce(
+    (s, v) => s + Math.max(0, Number(v.currentAmount) || 0),
+    0
+  );
+  const totalDreamsTargeted = dreamGoalCards.reduce(
+    (s, v) => s + Math.max(0, Number(v.targetAmount) || 0),
+    0
+  );
 
   const liveCalculatedTarget = calculateDreamTargetDateFromMonthly(
     Number(targetAmount) || 0,
@@ -224,7 +263,9 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
     if (readOnlyMode) return;
     setEditingVaultId(null);
     setName('');
-    setStorageType('Dream Investment');
+    setStorageType(
+      activeSectionTab === 'investment' ? 'Fixed Deposit (FD)' : 'Dream Investment'
+    );
     setCustomStorageType('');
     setSavedInAccountId(savingsOnlyAccounts[0]?.id || '');
     setFdBankName(savingsOnlyAccounts[0]?.name || '');
@@ -293,40 +334,38 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
       ? fdBankName.trim() || matchedSavingsAcc?.name || undefined
       : undefined;
 
+    const draftItem: Omit<DreamVault, 'id'> = {
+      name: name.trim(),
+      storageType,
+      customStorageType: storageType === 'Other' ? customStorageType.trim() : undefined,
+      savedInAccountId: savedInAccountId || undefined,
+      fdBankName: resolvedFdBank,
+      targetAmount: target,
+      currentAmount: current,
+      monthlyPlannedContribution: monthly,
+      targetDate: resolvedTargetDate,
+      targetDateMode,
+      notes: notes.trim() || undefined,
+      imageUrl: finalImageUrl,
+    };
+
+    // Switch active tab to match the created/updated item's classification
+    const belongsToInvestment = isPureInvestmentVault({
+      ...draftItem,
+      id: editingVaultId || 'preview',
+    });
+    setActiveSectionTab(belongsToInvestment ? 'investment' : 'dreams');
+
     if (editingVaultId) {
       const updated: DreamVault = {
+        ...draftItem,
         id: editingVaultId,
-        name: name.trim(),
-        storageType,
-        customStorageType: storageType === 'Other' ? customStorageType.trim() : undefined,
-        savedInAccountId: savedInAccountId || undefined,
-        fdBankName: resolvedFdBank,
-        targetAmount: target,
-        currentAmount: current,
-        monthlyPlannedContribution: monthly,
-        targetDate: resolvedTargetDate,
-        targetDateMode,
-        notes: notes.trim() || undefined,
-        imageUrl: finalImageUrl,
       };
       onUpdateDreamVault?.(updated);
-      onTriggerFeedback?.(`Dream & Investment Card "${updated.name}" Updated`, 'success');
+      onTriggerFeedback?.(`Card "${updated.name}" Updated`, 'success');
     } else {
-      onAddDreamVault({
-        name: name.trim(),
-        storageType,
-        customStorageType: storageType === 'Other' ? customStorageType.trim() : undefined,
-        savedInAccountId: savedInAccountId || undefined,
-        fdBankName: resolvedFdBank,
-        targetAmount: target,
-        currentAmount: current,
-        monthlyPlannedContribution: monthly,
-        targetDate: resolvedTargetDate,
-        targetDateMode,
-        notes: notes.trim() || undefined,
-        imageUrl: finalImageUrl,
-      });
-      onTriggerFeedback?.('Dream Vault Created Successfully', 'success');
+      onAddDreamVault(draftItem);
+      onTriggerFeedback?.('Card Created Successfully', 'success');
     }
 
     setName('');
@@ -348,7 +387,7 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
     onContributeToDreamVault(vaultId, amt, contributeAccountId);
     setContributeAmount('');
     setContributingVaultId(null);
-    onTriggerFeedback?.('Dream Fund Allocated Successfully', 'success');
+    onTriggerFeedback?.('Funds Allocated & Recorded Successfully', 'success');
   };
 
   const openPasswordDeleteModal = (v: DreamVault) => {
@@ -379,19 +418,390 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
     setDeletePasswordError('');
   };
 
+  const renderMediumCard = (v: DreamVault) => {
+    const pct =
+      v.targetAmount > 0
+        ? Math.min(100, Math.round((v.currentAmount / v.targetAmount) * 1000) / 10)
+        : 0;
+    const remaining = Math.max(0, v.targetAmount - v.currentAmount);
+    const monthsToGoal =
+      v.monthlyPlannedContribution > 0
+        ? Math.ceil(remaining / v.monthlyPlannedContribution)
+        : null;
+    const typeLabel = resolveFlexibleLabel(v.storageType, v.customStorageType);
+    const thumbnailSrc =
+      v.imageUrl || generateDefaultDreamThumbnailSvg(v.name, typeLabel);
+
+    const linkedRecords = transactions
+      .filter((tx) => tx.dreamVaultId === v.id)
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    const isExpanded = expandedCardId === v.id;
+
+    return (
+      <div
+        key={v.id}
+        data-testid={`dream-vault-card-${v.id}`}
+        onClick={() => setExpandedCardId((prev) => (prev === v.id ? null : v.id))}
+        className={`p-4 rounded-2xl border-2 transition-all duration-200 bg-white dark:bg-slate-900 flex flex-col justify-between space-y-3.5 cursor-pointer select-none ${
+          isExpanded
+            ? 'border-indigo-500 ring-2 ring-indigo-500/25 shadow-md'
+            : 'border-slate-200 dark:border-slate-800 hover:border-indigo-500/50 shadow-xs'
+        }`}
+      >
+        <div className="space-y-3">
+          {/* Medium Card Thumbnail Banner */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const file = extractImageFileFromDataTransfer(e.dataTransfer);
+              if (file) void processCardQuickThumbnailFile(v, file);
+            }}
+            onPaste={(e) => {
+              const file = extractImageFileFromDataTransfer(e.clipboardData);
+              if (file) {
+                e.preventDefault();
+                void processCardQuickThumbnailFile(v, file);
+              }
+            }}
+            tabIndex={0}
+            className="relative rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 h-28 bg-slate-900 group outline-none focus:ring-2 focus:ring-emerald-500/40"
+          >
+            <img
+              src={thumbnailSrc}
+              alt={v.name}
+              data-testid={`dream-vault-thumbnail-${v.id}`}
+              onError={(e) => {
+                e.currentTarget.src = generateDefaultDreamThumbnailSvg(v.name, typeLabel);
+              }}
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-950/75 via-transparent to-transparent flex items-end justify-between p-2.5">
+              <span className="px-2 py-0.5 rounded-md bg-slate-900/80 backdrop-blur-xs text-white text-[10px] font-bold uppercase tracking-wider border border-white/15">
+                {typeLabel}
+              </span>
+              {!readOnlyMode && (
+                <label
+                  title="Click, drag & drop, or paste image to update thumbnail"
+                  className="px-2 py-0.5 rounded-lg bg-slate-900/80 hover:bg-emerald-600 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors border border-white/15"
+                >
+                  <ImageIcon className="w-3 h-3" />
+                  <span>Photo</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => handleCardQuickThumbnailUpload(v, e)}
+                    className="hidden"
+                  />
+                </label>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <h3
+                  data-testid={`dream-vault-title-${v.id}`}
+                  className="text-sm font-bold text-slate-900 dark:text-white truncate"
+                >
+                  {v.name}
+                </h3>
+                <span
+                  data-testid={`dream-vault-target-label-${v.id}`}
+                  className="text-[11px] text-slate-500 dark:text-slate-400 block truncate"
+                >
+                  {v.targetDate === 'No Date' || v.targetDateMode === 'no_date'
+                    ? 'No Fixed Date'
+                    : v.targetDateMode === 'calculated_date'
+                    ? `Target by ${v.targetDate} (Auto)`
+                    : `Target by ${v.targetDate}`}
+                </span>
+                {(v.fdBankName || v.savedInAccountId) && (
+                  <span
+                    data-testid={`dream-vault-bank-badge-${v.id}`}
+                    className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md bg-teal-500/10 border border-teal-500/30 text-[10px] font-bold text-teal-700 dark:text-teal-300"
+                  >
+                    <Landmark className="w-2.5 h-2.5" />
+                    <span>
+                      {v.fdBankName
+                        ? `FD Bank: ${v.fdBankName}`
+                        : `Saved in: ${
+                            accounts.find((a) => a.id === v.savedInAccountId)?.name ||
+                            'Savings Account'
+                          }`}
+                    </span>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div
+              className="flex items-center gap-1 shrink-0"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                {pct}%
+              </span>
+              <button
+                type="button"
+                disabled={readOnlyMode}
+                data-testid={`edit-dream-vault-${v.id}`}
+                onClick={() => openEditForm(v)}
+                aria-label={`Edit dream vault ${v.name}`}
+                title="Edit Card Details & Thumbnail"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-500/10 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                disabled={readOnlyMode}
+                data-testid={`delete-dream-vault-${v.id}`}
+                onClick={() => openPasswordDeleteModal(v)}
+                aria-label={`Delete dream vault ${v.name}`}
+                title="Delete Card (Requires Password · Moves to Recycle Bin)"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-500/10 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div className="space-y-1">
+            <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+              <div
+                className="h-full bg-emerald-500 transition-all duration-300"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-xs font-mono tabular-nums">
+              <span className="font-bold text-slate-900 dark:text-white">
+                {currency}
+                {v.currentAmount.toLocaleString()} saved
+              </span>
+              <span className="text-slate-500">
+                Goal: {currency}
+                {v.targetAmount.toLocaleString()}
+              </span>
+            </div>
+          </div>
+
+          {/* Calculation breakdown */}
+          <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200/70 dark:border-slate-800/80 grid grid-cols-2 gap-2 text-xs">
+            <div>
+              <div className="text-slate-400 text-[10px]">Remaining to Target</div>
+              <div className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                {currency}
+                {remaining.toLocaleString()}
+              </div>
+            </div>
+            <div>
+              <div className="text-slate-400 text-[10px]">Planned Monthly</div>
+              <div className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                {currency}
+                {v.monthlyPlannedContribution.toLocaleString()}/mo
+                {monthsToGoal !== null && remaining > 0 ? ` (~${monthsToGoal} mo)` : ''}
+              </div>
+            </div>
+          </div>
+
+          {v.notes && (
+            <div className="text-xs text-slate-500 dark:text-slate-400 italic truncate">
+              &ldquo;{v.notes}&rdquo;
+            </div>
+          )}
+        </div>
+
+        {/* Expandable Linked Records Section + Quick Allocate Action */}
+        <div className="pt-2.5 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span
+              data-testid={`dream-card-records-toggle-${v.id}`}
+              className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1"
+            >
+              <ReceiptText className="w-3.5 h-3.5" />
+              <span>Linked Records ({linkedRecords.length})</span>
+              {isExpanded ? (
+                <ChevronUp className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronDown className="w-3.5 h-3.5" />
+              )}
+            </span>
+
+            {!readOnlyMode && contributingVaultId !== v.id && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setContributingVaultId(v.id);
+                  setContributeAmount(String(v.monthlyPlannedContribution || ''));
+                }}
+                className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <TrendingUp className="w-3 h-3" />
+                <span>+ Add Money</span>
+                <ArrowUpRight className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          {contributingVaultId === v.id && !readOnlyMode && (
+            <form
+              onClick={(e) => e.stopPropagation()}
+              onSubmit={(e) => handleContributeSubmit(e, v.id)}
+              className="space-y-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-emerald-500/30"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  value={contributeAmount}
+                  onChange={(e) => setContributeAmount(e.target.value)}
+                  placeholder={`Amount (${currency})`}
+                  required
+                  className="px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                />
+                <select
+                  value={contributeAccountId}
+                  onChange={(e) => setContributeAccountId(e.target.value)}
+                  className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+                >
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      From: {a.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setContributingVaultId(null)}
+                  className="px-2.5 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className={`px-3 py-1 text-xs font-semibold rounded cursor-pointer ${accentBtnClass}`}
+                >
+                  Save Record
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* EXPANDED RECORDS DRAWER WHEN CARD IS CLICKED */}
+          {isExpanded && (
+            <div
+              data-testid={`dream-card-records-panel-${v.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-indigo-500/30 space-y-2 transition-all duration-200"
+            >
+              <div className="flex items-center justify-between text-[11px] font-extrabold text-indigo-900 dark:text-indigo-200 pb-1.5 border-b border-slate-200 dark:border-slate-800">
+                <span>Records Linked to {v.name}</span>
+                <span className="font-mono">{linkedRecords.length} Records</span>
+              </div>
+
+              {linkedRecords.length === 0 ? (
+                <div className="py-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
+                  No records added for &ldquo;{v.name}&rdquo; yet. Add via Records &rarr; Transfer
+                  &rarr; Investment or click &ldquo;+ Add Money&rdquo;.
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {linkedRecords.map((tx) => {
+                    const fromAcc = accounts.find((a) => a.id === tx.accountId);
+                    return (
+                      <div
+                        key={tx.id}
+                        data-testid={`dream-card-record-row-${tx.id}`}
+                        className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-bold text-slate-900 dark:text-white truncate">
+                            #{tx.id} · {tx.title}
+                          </div>
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                            {tx.date} · From: {fromAcc?.name || 'Account'}
+                          </div>
+                        </div>
+                        <div className="font-mono font-extrabold text-emerald-600 dark:text-emerald-400 shrink-0">
+                          +{currency}
+                          {tx.amount.toLocaleString()}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6" data-testid="investments-and-dreams-view">
-      {/* Header & Summary KPIs */}
+      {/* Header & Left (Investment) / Right (Dreams) Switcher (Default on Investment) */}
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-xl font-extrabold text-slate-900 dark:text-white flex items-center">
             <span>Investments &amp; Dreams</span>
             <InfoTip
-              title="Portfolio & Goals"
-              text="Track Fixed Deposits (FDs), Gold, Mutual Funds, and Dream Goals. Linking a Savings Account records where the investment is held without changing your main Savings Account balance."
+              title="Investment & Dreams Sections"
+              text="Switch between Investment (FDs, Gold, Mutual Funds) on the left and Dreams (personal goals like Laptop, Vacation, Home) on the right. Click any card to expand its linked records."
             />
           </h2>
+
+          {/* Two Sections Switcher: Left = Investment (Default), Right = Dreams */}
+          <div
+            data-testid="investments-dreams-section-tabs"
+            className="inline-flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+          >
+            <button
+              type="button"
+              data-testid="dreams-tab-investment"
+              onClick={() => setActiveSectionTab('investment')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer ${
+                activeSectionTab === 'investment'
+                  ? 'bg-violet-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Landmark className="w-3.5 h-3.5" />
+              <span>Investment ({investmentCards.length})</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="dreams-tab-dreams"
+              onClick={() => setActiveSectionTab('dreams')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer ${
+                activeSectionTab === 'dreams'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Dreams ({dreamGoalCards.length})</span>
+            </button>
+          </div>
         </div>
+
         <button
           type="button"
           disabled={readOnlyMode}
@@ -408,53 +818,12 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
           className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed ${accentBtnClass}`}
         >
           {readOnlyMode ? <Lock className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-          {showAddForm ? 'Close Form' : 'New Investment / Goal'}
+          {showAddForm
+            ? 'Close Form'
+            : activeSectionTab === 'investment'
+            ? 'New Investment Card'
+            : 'New Dream Card'}
         </button>
-      </div>
-
-      {/* Summary Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-          <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center">
-            <span>Total Invested &amp; Saved</span>
-            <InfoTip text="Sum of current balances across all active investment & dream cards." />
-          </div>
-          <div className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
-            {currency}
-            {totalDreamSaved.toLocaleString()}
-          </div>
-          <div className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1">
-            {dreamVaults.length} active {dreamVaults.length === 1 ? 'card' : 'cards'}
-          </div>
-        </div>
-        <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-          <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center">
-            <span>Target Corpus</span>
-            <InfoTip text="Combined target goal across all investment and dream cards." />
-          </div>
-          <div className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
-            {currency}
-            {totalDreamTarget.toLocaleString()}
-          </div>
-          <div className="text-[11px] text-slate-500 mt-1">
-            {totalDreamTarget > 0
-              ? `${Math.min(100, Math.round((totalDreamSaved / totalDreamTarget) * 100))}% completion`
-              : '0% completion'}
-          </div>
-        </div>
-        <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-          <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center">
-            <span>Monthly Allocation</span>
-            <InfoTip text="Planned monthly contribution toward your investments and goals." />
-          </div>
-          <div className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-1">
-            {currency}
-            {totalMonthlyPlanned.toLocaleString()}/mo
-          </div>
-          <div className="text-[11px] text-slate-500 mt-1">
-            Planned monthly SIP / savings
-          </div>
-        </div>
       </div>
 
       {/* Create / Edit Dream Vault Form */}
@@ -471,7 +840,7 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
                   ? 'Edit Investment / Dream Card'
                   : 'Create Investment / Dream Card'}
               </span>
-              <InfoTip text="Choose an investment type (FD, Gold, Mutual Funds, or Goal) and designate which Savings Account holds it. Main account balance is not altered." />
+              <InfoTip text="Choose an investment type (FD, Gold, Mutual Funds, or Dream Goal) and designate which Savings Account holds it. Main account balance is not altered until a record is logged." />
             </h3>
             {editingVaultId && (
               <span className="px-2.5 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[11px] font-bold">
@@ -506,7 +875,7 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
                   className="flex items-center text-xs font-semibold text-slate-700 dark:text-slate-300"
                 >
                   <span>Investment / Storage Type</span>
-                  <InfoTip text="Select Fixed Deposit (FD), Gold, Mutual Funds, or another goal type." />
+                  <InfoTip text="Select Fixed Deposit (FD), Gold, Mutual Funds (Investment tab) or Dream Investment / Emergency Fund / Real Estate Goal (Dreams tab)." />
                 </label>
                 <DropdownListEditButton
                   listKey="dream_storage_type"
@@ -544,7 +913,7 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
                 className="flex items-center text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
               >
                 <span>Saved in Account (Savings)</span>
-                <InfoTip text="Only Savings Accounts are listed (excludes Credit Cards & Loans). Records that this amount is held in this bank without changing your main Savings Account balance." />
+                <InfoTip text="Only Savings Accounts are listed (excludes Credit Cards & Loans)." />
               </label>
               <select
                 id="dream-saved-in-account"
@@ -604,7 +973,7 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
                 >
                   <Landmark className="w-3.5 h-3.5 mr-1.5 text-teal-600" />
                   <span>FD Bank / Institution</span>
-                  <InfoTip text="Specify which bank holds this Fixed Deposit. Reflected in the Dashboard Total Investments card under Total FDs without changing your Savings Account balance." />
+                  <InfoTip text="Specify which bank holds this Fixed Deposit." />
                 </label>
                 <input
                   id="dream-fd-bank-input"
@@ -810,7 +1179,7 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
 
             <div {...dreamThumbDropProps}>
               <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                Card Thumbnail Image (Click, Drag & Drop, or Paste Ctrl+V)
+                Card Thumbnail Image (Click, Drag &amp; Drop, or Paste Ctrl+V)
               </label>
               <div className="flex flex-wrap items-center gap-3">
                 <label
@@ -879,303 +1248,193 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
         </form>
       )}
 
-      {/* Vault Cards Grid */}
-      {dreamVaults.length === 0 ? (
-        <div className="p-8 rounded-xl border border-dashed border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 text-center space-y-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center mx-auto">
-            <Sparkles className="w-5 h-5" />
-          </div>
-          <div className="space-y-1">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-              No Dream Vaults or Investment Storage Goals Yet
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-              Create your first Dream Vault (e.g., Emergency Fund, Real Estate Goal, Equity Portfolio, or Gold Reserve) to track progress and allocate monthly funds.
-            </p>
-          </div>
-          <button
-            type="button"
-            disabled={readOnlyMode}
-            onClick={openCreateForm}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-2 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed ${accentBtnClass}`}
-          >
-            <Plus className="w-4 h-4" />
-            Create First Dream Vault
-          </button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {dreamVaults.map((v) => {
-            const pct =
-              v.targetAmount > 0
-                ? Math.min(100, Math.round((v.currentAmount / v.targetAmount) * 1000) / 10)
-                : 0;
-            const remaining = Math.max(0, v.targetAmount - v.currentAmount);
-            const monthsToGoal =
-              v.monthlyPlannedContribution > 0
-                ? Math.ceil(remaining / v.monthlyPlannedContribution)
-                : null;
-            const typeLabel = resolveFlexibleLabel(v.storageType, v.customStorageType);
-            const thumbnailSrc =
-              v.imageUrl || generateDefaultDreamThumbnailSvg(v.name, typeLabel);
-
-            return (
-              <div
-                key={v.id}
-                data-testid={`dream-vault-card-${v.id}`}
-                className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col justify-between space-y-4 shadow-xs"
-              >
-                <div className="space-y-3">
-                  {/* Prominent Thumbnail Image Displayed on Every Card */}
-                  <div
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const file = extractImageFileFromDataTransfer(e.dataTransfer);
-                      if (file) void processCardQuickThumbnailFile(v, file);
-                    }}
-                    onPaste={(e) => {
-                      const file = extractImageFileFromDataTransfer(e.clipboardData);
-                      if (file) {
-                        e.preventDefault();
-                        void processCardQuickThumbnailFile(v, file);
-                      }
-                    }}
-                    tabIndex={0}
-                    className="relative rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 h-36 bg-slate-900 group outline-none focus:ring-2 focus:ring-emerald-500/40"
-                  >
-                    <img
-                      src={thumbnailSrc}
-                      alt={v.name}
-                      data-testid={`dream-vault-thumbnail-${v.id}`}
-                      onError={(e) => {
-                        e.currentTarget.src = generateDefaultDreamThumbnailSvg(v.name, typeLabel);
-                      }}
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/75 via-transparent to-transparent flex items-end justify-between p-3">
-                      <span className="px-2.5 py-0.5 rounded-md bg-slate-900/80 backdrop-blur-xs text-white text-[10px] font-bold uppercase tracking-wider border border-white/15">
-                        {typeLabel}
-                      </span>
-                      {!readOnlyMode && (
-                        <label
-                          title="Click, drag & drop, or paste image to update thumbnail"
-                          className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-emerald-600 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors border border-white/15"
-                        >
-                          <ImageIcon className="w-3 h-3" />
-                          <span>Thumbnail</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) => handleCardQuickThumbnailUpload(v, e)}
-                            className="hidden"
-                          />
-                        </label>
-                      )}
-                    </div>
+      {/* =================================================================== */}
+      {/* SECTION 1 (LEFT, DEFAULT): INVESTMENT                               */}
+      {/* Above: Medium-sized "Total Invested & Saved" card with details      */}
+      {/* Below: Medium-sized individual Investment cards                     */}
+      {/* =================================================================== */}
+      {activeSectionTab === 'investment' && (
+        <div data-testid="investment-section-panel" className="space-y-5">
+          {/* Medium-sized Card Above: Total Invested & Saved */}
+          <div className="max-w-md">
+            <div
+              data-testid="investment-total-invested-saved-card"
+              className="p-4 rounded-2xl border-2 border-violet-500/35 bg-gradient-to-br from-violet-500/10 via-white to-violet-500/5 dark:from-violet-950/30 dark:via-slate-900 dark:to-slate-900 shadow-xs space-y-3"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-violet-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <Landmark className="w-4 h-4" />
                   </div>
-
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-9 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
-                        <Sparkles className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h3
-                          data-testid={`dream-vault-title-${v.id}`}
-                          className="text-sm font-bold text-slate-900 dark:text-white"
-                        >
-                          {v.name}
-                        </h3>
-                        <span
-                          data-testid={`dream-vault-target-label-${v.id}`}
-                          className="text-[11px] text-slate-500 dark:text-slate-400 block"
-                        >
-                          {typeLabel} ·{' '}
-                          {v.targetDate === 'No Date' || v.targetDateMode === 'no_date'
-                            ? 'No Fixed Date'
-                            : v.targetDateMode === 'calculated_date'
-                            ? `Target by ${v.targetDate} (As per Calculation)`
-                            : `Target by ${v.targetDate}`}
-                        </span>
-                        {(v.fdBankName || v.savedInAccountId) && (
-                          <span
-                            data-testid={`dream-vault-bank-badge-${v.id}`}
-                            className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md bg-teal-500/10 border border-teal-500/30 text-[10px] font-bold text-teal-700 dark:text-teal-300"
-                          >
-                            <Landmark className="w-2.5 h-2.5" />
-                            <span>
-                              {v.fdBankName
-                                ? `FD Bank: ${v.fdBankName}`
-                                : `Saved in: ${
-                                    accounts.find((a) => a.id === v.savedInAccountId)?.name ||
-                                    'Savings Account'
-                                  }`}
-                            </span>
-                          </span>
-                        )}
-                      </div>
+                  <div>
+                    <div className="text-xs font-extrabold uppercase tracking-wider text-violet-800 dark:text-violet-300 flex items-center">
+                      <span>Total Invested &amp; Saved</span>
+                      <InfoTip text="Combined current balance across your Fixed Deposits (FDs), Gold, Mutual Funds, and SIP investment cards." />
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="px-2 py-0.5 rounded text-xs font-mono font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                        {pct}%
-                      </span>
-                      <button
-                        type="button"
-                        disabled={readOnlyMode}
-                        data-testid={`edit-dream-vault-${v.id}`}
-                        onClick={() => openEditForm(v)}
-                        aria-label={`Edit dream vault ${v.name}`}
-                        title="Edit Card Details & Thumbnail"
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-500/10 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={readOnlyMode}
-                        data-testid={`delete-dream-vault-${v.id}`}
-                        onClick={() => openPasswordDeleteModal(v)}
-                        aria-label={`Delete dream vault ${v.name}`}
-                        title="Delete Card (Requires Password · Moves to Recycle Bin)"
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-500/10 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {investmentCards.length} active investment{' '}
+                      {investmentCards.length === 1 ? 'card' : 'cards'}
+                    </p>
                   </div>
-
-                  {/* Progress bar */}
-                  <div className="space-y-1.5">
-                    <div className="h-2.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                      <div
-                        className="h-full bg-emerald-500 transition-all duration-300"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-xs font-mono tabular-nums">
-                      <span className="font-bold text-slate-900 dark:text-white">
-                        {currency}
-                        {v.currentAmount.toLocaleString()} saved
-                      </span>
-                      <span className="text-slate-500">
-                        Goal: {currency}
-                        {v.targetAmount.toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Calculation breakdown */}
-                  <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200/70 dark:border-slate-800/80 grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <div className="text-slate-400 text-[11px]">Remaining to Target</div>
-                      <div className="font-mono font-semibold text-slate-800 dark:text-slate-200">
-                        {currency}
-                        {remaining.toLocaleString()}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-slate-400 text-[11px]">Planned Monthly</div>
-                      <div className="font-mono font-semibold text-slate-800 dark:text-slate-200">
-                        {currency}
-                        {v.monthlyPlannedContribution.toLocaleString()}/mo
-                        {monthsToGoal !== null && remaining > 0 ? ` (~${monthsToGoal} mo)` : ''}
-                      </div>
-                    </div>
-                  </div>
-
-                  {v.notes && (
-                    <div className="text-xs text-slate-500 dark:text-slate-400 italic">
-                      &ldquo;{v.notes}&rdquo;
-                    </div>
-                  )}
                 </div>
 
-                {/* Contribute action */}
-                <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
-                  {contributingVaultId === v.id && !readOnlyMode ? (
-                    <form
-                      onSubmit={(e) => handleContributeSubmit(e, v.id)}
-                      className="space-y-2.5"
-                    >
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0.01"
-                          value={contributeAmount}
-                          onChange={(e) => setContributeAmount(e.target.value)}
-                          placeholder={`Amount (${currency})`}
-                          required
-                          className="px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
-                        />
-                        <select
-                          value={contributeAccountId}
-                          onChange={(e) => setContributeAccountId(e.target.value)}
-                          className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
-                        >
-                          {accounts.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              From: {a.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setContributingVaultId(null)}
-                          className="px-2.5 py-1 text-xs rounded border border-slate-300 dark:border-slate-700"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="submit"
-                          className={`px-3 py-1 text-xs font-semibold rounded ${accentBtnClass}`}
-                        >
-                          Record Contribution
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        disabled={readOnlyMode}
-                        onClick={() => {
-                          if (readOnlyMode) return;
-                          setContributingVaultId(v.id);
-                          setContributeAmount(String(v.monthlyPlannedContribution || ''));
-                        }}
-                        className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed"
-                      >
-                        <TrendingUp className="w-3.5 h-3.5" />
-                        {readOnlyMode
-                          ? 'Account On Hold (Read-Only)'
-                          : 'Allocate Funds into Dream Storage'}
-                        <ArrowUpRight className="w-3.5 h-3.5" />
-                      </button>
-
-                      {!readOnlyMode && (
-                        <button
-                          type="button"
-                          onClick={() => openEditForm(v)}
-                          className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
-                        >
-                          <Pencil className="w-3 h-3" />
-                          <span>Edit Card</span>
-                        </button>
-                      )}
-                    </div>
-                  )}
+                <div className="text-right">
+                  <div
+                    data-testid="investment-total-invested-saved-value"
+                    className="text-2xl font-extrabold font-mono tabular-nums text-violet-700 dark:text-violet-300"
+                  >
+                    {currency}
+                    {totalInvestmentSaved.toLocaleString()}
+                  </div>
+                  <div className="text-[10px] font-semibold text-slate-500">
+                    Target: {currency}
+                    {totalInvestmentTarget.toLocaleString()}
+                  </div>
                 </div>
               </div>
-            );
-          })}
+
+              <div className="pt-2 border-t border-violet-500/20 grid grid-cols-2 gap-2 text-xs">
+                <div className="p-2 rounded-lg bg-slate-50/90 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Fixed Deposits ({fdCardsInInvestment.length})
+                  </div>
+                  <div className="font-mono font-extrabold text-violet-600 dark:text-violet-400 mt-0.5">
+                    {currency}
+                    {totalFdSavedInInvestment.toLocaleString()}
+                  </div>
+                </div>
+                <div className="p-2 rounded-lg bg-slate-50/90 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Gold / MF / Equity
+                  </div>
+                  <div className="font-mono font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                    {currency}
+                    {Math.max(0, totalInvestmentSaved - totalFdSavedInInvestment).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Individual Medium Investment Cards Below */}
+          {investmentCards.length === 0 ? (
+            <div className="p-8 rounded-xl border border-dashed border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 text-center space-y-3">
+              <div className="w-10 h-10 rounded-xl bg-violet-500/10 text-violet-500 flex items-center justify-center mx-auto">
+                <Landmark className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  No Investment Cards Added Yet
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                  Create your first Investment card (Fixed Deposit, Gold, Mutual Funds &amp; SIP, or Equity) to track your wealth and link records.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={readOnlyMode}
+                onClick={openCreateForm}
+                className={`px-4 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-2 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed ${accentBtnClass}`}
+              >
+                <Plus className="w-4 h-4" />
+                Create Investment Card
+              </button>
+            </div>
+          ) : (
+            <div
+              data-testid="investment-cards-grid"
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start"
+            >
+              {investmentCards.map((v) => renderMediumCard(v))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* SECTION 2 (RIGHT): DREAMS                                           */}
+      {/* Above: 2 Cards -> "Total Saved for Dreams" & "Total Targeted"       */}
+      {/* Below: Individual Dream cards (Click any card to expand records)    */}
+      {/* =================================================================== */}
+      {activeSectionTab === 'dreams' && (
+        <div data-testid="dreams-section-panel" className="space-y-5">
+          {/* Cards Above: Total Saved for Dreams & Total Targeted */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+            <div
+              data-testid="dreams-total-saved-card"
+              className="p-4 rounded-2xl border-2 border-emerald-500/35 bg-gradient-to-br from-emerald-500/10 via-white to-emerald-500/5 dark:from-emerald-950/30 dark:via-slate-900 dark:to-slate-900 shadow-xs"
+            >
+              <div className="text-xs font-extrabold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 flex items-center">
+                <span>Total Saved for Dreams</span>
+                <InfoTip text="Combined saved balance across all your Dream cards." />
+              </div>
+              <div
+                data-testid="dreams-total-saved-value"
+                className="text-2xl font-extrabold font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-1.5"
+              >
+                {currency}
+                {totalDreamsSaved.toLocaleString()}
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                {dreamGoalCards.length} active dream {dreamGoalCards.length === 1 ? 'card' : 'cards'}
+              </div>
+            </div>
+
+            <div
+              data-testid="dreams-total-targeted-card"
+              className="p-4 rounded-2xl border-2 border-indigo-500/35 bg-gradient-to-br from-indigo-500/10 via-white to-indigo-500/5 dark:from-indigo-950/30 dark:via-slate-900 dark:to-slate-900 shadow-xs"
+            >
+              <div className="text-xs font-extrabold uppercase tracking-wider text-indigo-800 dark:text-indigo-300 flex items-center">
+                <span>Total Targeted</span>
+                <InfoTip text="Total target goal amount across all your Dream cards." />
+              </div>
+              <div
+                data-testid="dreams-total-targeted-value"
+                className="text-2xl font-extrabold font-mono tabular-nums text-indigo-700 dark:text-indigo-400 mt-1.5"
+              >
+                {currency}
+                {totalDreamsTargeted.toLocaleString()}
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                {totalDreamsTargeted > 0
+                  ? `${Math.min(100, Math.round((totalDreamsSaved / totalDreamsTargeted) * 100))}% of dream target achieved`
+                  : '0% achieved'}
+              </div>
+            </div>
+          </div>
+
+          {/* Individual Dream Cards Below (Click any card e.g. Laptop to expand with records) */}
+          {dreamGoalCards.length === 0 ? (
+            <div className="p-8 rounded-xl border border-dashed border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900 text-center space-y-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center mx-auto">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  No Dream Cards Added Yet
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                  Create a Dream card (e.g., Laptop, Emergency Fund, Real Estate Goal, or Family Vacation) and click any card to view its linked records.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={readOnlyMode}
+                onClick={openCreateForm}
+                className={`px-4 py-2 rounded-lg text-xs font-semibold inline-flex items-center gap-2 cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed ${accentBtnClass}`}
+              >
+                <Plus className="w-4 h-4" />
+                Create Dream Card
+              </button>
+            </div>
+          ) : (
+            <div
+              data-testid="dreams-cards-grid"
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start"
+            >
+              {dreamGoalCards.map((v) => renderMediumCard(v))}
+            </div>
+          )}
         </div>
       )}
 

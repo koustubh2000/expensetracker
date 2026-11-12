@@ -60,6 +60,7 @@ import {
   generateAvailableMonthsFromJan2026,
   DEFAULT_PRIMARY_ADMIN_EMAIL,
   hashSecretIrreversibly,
+  isPureInvestmentVault,
   resolveFlexibleLabel,
   verifySecretAgainstStoredHash,
 } from './utils/financeRules';
@@ -104,6 +105,8 @@ import {
   deleteCloudTransaction,
   deleteUserFromCloud,
   ensureCloudUserInitialized,
+  fetchCloudUsersFromServer,
+  fetchUserCloudVaultFromServer,
   onAuthStateChanged,
   resetEntireCloudPortal,
   saveCloudAccount,
@@ -317,6 +320,15 @@ export default function App() {
       getInitialLocalUsers: () => purgeExpiredSupportChats(loadUsersFromLocal()).users,
     });
 
+    void fetchCloudUsersFromServer(purgeExpiredSupportChats(loadUsersFromLocal()).users).then(
+      (cloudUsers) => {
+        if (cloudUsers && cloudUsers.length > 0) {
+          const { users: cleanedUsers } = purgeExpiredSupportChats(cloudUsers);
+          setUsers(cleanedUsers);
+        }
+      }
+    );
+
     return () => {
       unsubGlobal();
       unsubUsers();
@@ -385,20 +397,34 @@ export default function App() {
     };
   }, []);
 
-  // Load & live-subscribe to user vault across devices when switching between workspace profiles
+  // Load & live-subscribe to user vault across devices (including Tor / Incognito) when switching between workspace profiles
   useEffect(() => {
-    if (activeUserId && (!firebaseUser || firebaseUser.uid !== activeUserId)) {
+    if (activeUserId) {
+      let cancelled = false;
       const loaded = loadUserVault(activeUserId, false);
       setVault(loaded);
+
+      // Actively fetch from Firestore server so Tor / Incognito / fresh browser logins immediately hydrate all records
+      void fetchUserCloudVaultFromServer(activeUserId, loaded).then((cloudVault) => {
+        if (!cancelled && cloudVault) {
+          setVault(cloudVault);
+        }
+      });
+
       const unsubUserVault = subscribeToUserCloudVault(activeUserId, {
-        onVault: (cloudVault) => setVault(cloudVault),
+        onVault: (cloudVault) => {
+          if (!cancelled) {
+            setVault(cloudVault);
+          }
+        },
         getInitialLocalVault: () => loadUserVault(activeUserId, false),
       });
       return () => {
+        cancelled = true;
         unsubUserVault();
       };
     }
-  }, [activeUserId, firebaseUser]);
+  }, [activeUserId]);
 
   const isCloudSession = Boolean(firebaseUser && activeUserId === firebaseUser.uid);
 
@@ -497,7 +523,13 @@ export default function App() {
     setHoldDismissedForLoadUserId(null);
     setActiveUserId(latestUser.id);
     saveActiveSessionUserId(latestUser.id);
-    setVault(loadUserVault(latestUser.id, false));
+    const initialLocalVault = loadUserVault(latestUser.id, false);
+    setVault(initialLocalVault);
+    void fetchUserCloudVaultFromServer(latestUser.id, initialLocalVault).then((cloudVault) => {
+      if (cloudVault) {
+        setVault(cloudVault);
+      }
+    });
 
     // Silent Login: Routine "Login Successful" popups/toasts are completely removed upon normal login.
     return { ok: true };
@@ -1271,8 +1303,29 @@ export default function App() {
       persistUsersChange(nextUsers);
     }
 
+    const prevTx = vault.transactions.find((t) => t.id === updatedTx.id);
+
     if (isCloudSession && firebaseUser) {
       await saveCloudTransaction(firebaseUser.uid, updatedTx);
+      if (prevTx?.type === 'dream_investment' && prevTx.dreamVaultId) {
+        const oldVault = vault.dreamVaults.find((d) => d.id === prevTx.dreamVaultId);
+        if (oldVault) {
+          await updateCloudDreamVaultAmount(
+            oldVault.id,
+            Math.max(0, oldVault.currentAmount - prevTx.amount)
+          );
+        }
+      }
+      if (updatedTx.type === 'dream_investment' && updatedTx.dreamVaultId) {
+        const newVault = vault.dreamVaults.find((d) => d.id === updatedTx.dreamVaultId);
+        if (newVault) {
+          const baseAmt =
+            prevTx?.type === 'dream_investment' && prevTx.dreamVaultId === newVault.id
+              ? Math.max(0, newVault.currentAmount - prevTx.amount)
+              : newVault.currentAmount;
+          await updateCloudDreamVaultAmount(newVault.id, baseAmt + updatedTx.amount);
+        }
+      }
       setEditingTransaction(null);
       triggerFeedback(`Record #${updatedTx.id} Updated Successfully`, 'success', 'toast');
       return;
@@ -1281,6 +1334,18 @@ export default function App() {
     const nextTransactions = vault.transactions.map((t) =>
       t.id === updatedTx.id ? updatedTx : t
     );
+
+    const nextDreamVaults = vault.dreamVaults.map((dv) => {
+      let nextAmt = dv.currentAmount;
+      if (prevTx?.type === 'dream_investment' && prevTx.dreamVaultId === dv.id) {
+        nextAmt = Math.max(0, nextAmt - prevTx.amount);
+      }
+      if (updatedTx.type === 'dream_investment' && updatedTx.dreamVaultId === dv.id) {
+        nextAmt = nextAmt + updatedTx.amount;
+      }
+      return nextAmt !== dv.currentAmount ? { ...dv, currentAmount: nextAmt } : dv;
+    });
+
     const nextExpected = vault.expectedItems.map((e) => {
       if (e.linkedTransactionId !== updatedTx.id) return e;
       const isSplitExpected =
@@ -1309,6 +1374,7 @@ export default function App() {
     persistVaultChange({
       ...vault,
       transactions: nextTransactions,
+      dreamVaults: nextDreamVaults,
       expectedItems: nextExpected,
     });
     setEditingTransaction(null);
@@ -1378,6 +1444,15 @@ export default function App() {
     const target = vault.transactions.find((t) => t.id === id);
     if (isCloudSession) {
       await deleteCloudTransaction(id);
+      if (target?.type === 'dream_investment' && target.dreamVaultId) {
+        const linkedDv = vault.dreamVaults.find((d) => d.id === target.dreamVaultId);
+        if (linkedDv) {
+          await updateCloudDreamVaultAmount(
+            linkedDv.id,
+            Math.max(0, linkedDv.currentAmount - target.amount)
+          );
+        }
+      }
       triggerFeedback(`Record #${id} Moved to Recycle Bin`, 'success', 'toast');
       return;
     }
@@ -1402,9 +1477,19 @@ export default function App() {
         })
       : vault.recycleBin;
 
+    const nextDreamVaults =
+      target?.type === 'dream_investment' && target.dreamVaultId
+        ? vault.dreamVaults.map((dv) =>
+            dv.id === target.dreamVaultId
+              ? { ...dv, currentAmount: Math.max(0, dv.currentAmount - target.amount) }
+              : dv
+          )
+        : vault.dreamVaults;
+
     persistVaultChange({
       ...vault,
       transactions: vault.transactions.filter((t) => t.id !== id),
+      dreamVaults: nextDreamVaults,
       expectedItems: vault.expectedItems.filter((e) => e.linkedTransactionId !== id),
       recycleBin: nextBin,
     });
@@ -2055,9 +2140,18 @@ export default function App() {
         ...restoredTx,
         proofImageDataUrl: proofUrl || restoredTx.proofImageDataUrl,
       };
+      const restoredDreamVaults =
+        fullTx.type === 'dream_investment' && fullTx.dreamVaultId
+          ? vault.dreamVaults.map((dv) =>
+              dv.id === fullTx.dreamVaultId
+                ? { ...dv, currentAmount: dv.currentAmount + fullTx.amount }
+                : dv
+            )
+          : vault.dreamVaults;
       persistVaultChange({
         ...vault,
         transactions: [fullTx, ...vault.transactions.filter((t) => t.id !== fullTx.id)],
+        dreamVaults: restoredDreamVaults,
         recycleBin: remainingBin,
       });
       triggerFeedback(`Restored Record #${fullTx.id} from Recycle Bin`, 'success', 'toast');
@@ -2629,7 +2723,15 @@ export default function App() {
     ) {
       return false;
     }
-    if (selectedTxType !== 'ALL' && tx.type !== selectedTxType) return false;
+    if (selectedTxType !== 'ALL') {
+      if (selectedTxType === 'transfer') {
+        if (tx.type !== 'transfer' && tx.type !== 'dream_investment' && !tx.isPaidEmi) {
+          return false;
+        }
+      } else if (tx.type !== selectedTxType) {
+        return false;
+      }
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const cat = resolveFlexibleLabel(tx.category, tx.customCategory).toLowerCase();
@@ -2699,10 +2801,7 @@ export default function App() {
     vault.personRecordGroups || []
   );
 
-  const activeLoansOnDashboard = useMemo(
-    () => (vault.loans || []).filter((l) => !l.archivedToHistory),
-    [vault.loans]
-  );
+  const activeLoansOnDashboard = (vault.loans || []).filter((l) => !l.archivedToHistory);
 
   // Show the On Hold Popup on login, on every browser refresh, or when Admin sends a new unread notice while on hold
   const shouldShowHoldPopup =
@@ -3733,7 +3832,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Summary Card 5: Total Investments (Golden Wealth Theme — "My Money") */}
+                {/* Summary Card 5: Total Investments */}
                 <div
                   role="button"
                   tabIndex={0}
@@ -3748,26 +3847,26 @@ export default function App() {
                   }}
                   className={`p-4 rounded-2xl border-2 transition-all duration-200 flex flex-col justify-between cursor-pointer select-none ${
                     expandedSummaryCard === 'totalInvestments'
-                      ? 'border-yellow-500 bg-gradient-to-br from-yellow-500/20 via-amber-500/15 to-yellow-600/10 dark:from-yellow-900/40 dark:via-amber-950/40 dark:to-slate-900 shadow-md ring-2 ring-yellow-500/40'
-                      : 'border-yellow-500/50 bg-gradient-to-br from-yellow-500/15 via-amber-50/60 to-yellow-500/5 dark:from-yellow-950/35 dark:via-slate-900 dark:to-amber-950/20 hover:border-yellow-500/80 shadow-sm'
+                      ? 'border-violet-600 bg-violet-500/15 dark:bg-violet-950/40 shadow-md ring-2 ring-violet-500/30'
+                      : 'border-violet-500/35 bg-gradient-to-br from-violet-500/10 via-white to-violet-500/5 dark:from-violet-950/25 dark:via-slate-900 dark:to-slate-900 hover:border-violet-500/60 shadow-xs'
                   }`}
                 >
                   <div>
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-start gap-2.5 min-w-0">
-                        <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-yellow-500 to-amber-600 text-white flex items-center justify-center shrink-0 shadow-xs mt-0.5">
+                        <div className="w-8 h-8 rounded-xl bg-violet-600 text-white flex items-center justify-center shrink-0 shadow-xs mt-0.5">
                           <Vault className="w-4 h-4" />
                         </div>
                         <div className="min-w-0">
-                          <div className="text-xs font-extrabold uppercase tracking-wider text-yellow-800 dark:text-yellow-300 whitespace-normal break-words leading-snug">
+                          <div className="text-xs font-extrabold uppercase tracking-wider text-violet-800 dark:text-violet-300 whitespace-normal break-words leading-snug">
                             Total Investments
                           </div>
-                          <p className="text-[11px] text-yellow-700/80 dark:text-yellow-400/80 whitespace-normal break-words leading-snug mt-0.5">
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-normal break-words leading-snug mt-0.5">
                             Dreams &amp; Investments ({(vault.dreamVaults || []).length})
                           </p>
                         </div>
                       </div>
-                      <span className="text-yellow-700 dark:text-yellow-300 shrink-0 mt-0.5">
+                      <span className="text-violet-600 dark:text-violet-400 shrink-0 mt-0.5">
                         {expandedSummaryCard === 'totalInvestments' ? (
                           <ChevronUp className="w-4 h-4" />
                         ) : (
@@ -3778,7 +3877,7 @@ export default function App() {
 
                     <div
                       data-testid="summary-card-total-investments-value"
-                      className="mt-3 text-xl font-extrabold font-mono tabular-nums text-yellow-700 dark:text-yellow-300 break-words"
+                      className="mt-3 text-xl font-extrabold font-mono tabular-nums text-violet-700 dark:text-violet-400 break-words"
                     >
                       {currency}
                       {dashboardSummaryCards.totalInvestmentsAmount.toLocaleString(undefined, {
@@ -3788,17 +3887,17 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="mt-3 pt-2 border-t border-yellow-500/30 grid grid-cols-2 gap-1.5">
+                  <div className="mt-3 pt-2 border-t border-violet-500/20 grid grid-cols-2 gap-1.5">
                     <div
                       data-testid="dashboard-investments-sub-fds"
-                      className="p-1.5 rounded-lg bg-yellow-500/10 dark:bg-yellow-950/40 border border-yellow-500/30"
+                      className="p-1.5 rounded-lg bg-slate-50/90 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80"
                     >
-                      <div className="text-[9px] font-bold uppercase tracking-wider text-yellow-800 dark:text-yellow-300 whitespace-normal break-words leading-tight">
+                      <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-normal break-words leading-tight">
                         Total FDs ({dashboardSummaryCards.totalFdCount})
                       </div>
                       <div
                         data-testid="dashboard-investments-sub-fds-value"
-                        className="mt-0.5 text-[11px] font-extrabold font-mono tabular-nums text-yellow-700 dark:text-yellow-300"
+                        className="mt-0.5 text-[11px] font-extrabold font-mono tabular-nums text-violet-600 dark:text-violet-400"
                       >
                         {currency}
                         {dashboardSummaryCards.totalFdAmount.toLocaleString()}
@@ -3806,14 +3905,14 @@ export default function App() {
                     </div>
                     <div
                       data-testid="dashboard-investments-sub-other"
-                      className="p-1.5 rounded-lg bg-amber-500/10 dark:bg-amber-950/40 border border-amber-500/30"
+                      className="p-1.5 rounded-lg bg-slate-50/90 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80"
                     >
-                      <div className="text-[9px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300 whitespace-normal break-words leading-tight">
+                      <div className="text-[9px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-normal break-words leading-tight">
                         Dreams / Gold / MF
                       </div>
                       <div
                         data-testid="dashboard-investments-sub-other-value"
-                        className="mt-0.5 text-[11px] font-extrabold font-mono tabular-nums text-amber-700 dark:text-amber-300"
+                        className="mt-0.5 text-[11px] font-extrabold font-mono tabular-nums text-emerald-600 dark:text-emerald-400"
                       >
                         {currency}
                         {dashboardSummaryCards.otherInvestmentsAmount.toLocaleString()}
@@ -4316,31 +4415,9 @@ export default function App() {
                   {/* 5. EXPANDED VIEW FOR TOTAL INVESTMENTS (Golden Theme + Divided Left: Dreams Cards / Right: Investments Cards) */}
                   {expandedSummaryCard === 'totalInvestments' && (() => {
                     const allVaults = vault.dreamVaults || [];
-                    const isPureInvestmentItem = (dv: DreamVault): boolean => {
-                      if (
-                        dv.storageType === 'Fixed Deposit (FD)' ||
-                        dv.storageType === 'Mutual Funds & SIP' ||
-                        dv.storageType === 'Equity & Mutual Funds' ||
-                        dv.storageType === 'Gold & Bullion' ||
-                        dv.storageType === 'Lending Pool'
-                      ) {
-                        return true;
-                      }
-                      if (
-                        dv.storageType === 'Other' &&
-                        dv.customStorageType &&
-                        /\b(fd|fixed deposit|sip|mutual fund|gold|bullion|equity|stock|bond|ppf|nps|rd|investment)\b/i.test(
-                          dv.customStorageType
-                        )
-                      ) {
-                        return true;
-                      }
-                      return false;
-                    };
-
-                    const leftDreamsCards = allVaults.filter((dv) => !isPureInvestmentItem(dv));
+                    const leftDreamsCards = allVaults.filter((dv) => !isPureInvestmentVault(dv));
                     const rightInvestmentsCards = allVaults.filter((dv) =>
-                      isPureInvestmentItem(dv)
+                      isPureInvestmentVault(dv)
                     );
 
                     const leftDreamsSavedTotal = leftDreamsCards.reduce(
@@ -4466,22 +4543,13 @@ export default function App() {
                     };
 
                     return (
-                      <div
-                        data-testid="expanded-panel-total-investments"
-                        className="space-y-4 rounded-xl border border-yellow-500/40 bg-gradient-to-br from-yellow-500/5 via-amber-500/5 to-transparent p-3 sm:p-4"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-yellow-500/30">
+                      <div data-testid="expanded-panel-total-investments" className="space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
                           <div>
-                            <div className="flex items-center gap-2">
-                              <span className="px-2.5 py-0.5 rounded-md bg-gradient-to-r from-yellow-500 to-amber-600 text-white text-[10px] font-extrabold uppercase tracking-wider shadow-2xs">
-                                Golden Wealth Portfolio · My Money
-                              </span>
-                              <h3 className="text-sm font-extrabold text-yellow-950 dark:text-yellow-100">
-                                Total Investments &amp; Dreams — Divided Golden View (
-                                {allVaults.length})
-                              </h3>
-                            </div>
-                            <p className="text-xs text-yellow-800/80 dark:text-yellow-300/80 mt-0.5">
+                            <h3 className="text-sm font-extrabold text-violet-700 dark:text-violet-300">
+                              Total Investments — Dreams &amp; Investments ({allVaults.length})
+                            </h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
                               Left: Dreams &amp; Financial Goals ({leftDreamsCards.length}) · Right:
                               Investments &amp; Fixed Deposits ({rightInvestmentsCards.length})
                             </p>
@@ -4490,7 +4558,7 @@ export default function App() {
                             <button
                               type="button"
                               onClick={() => setActiveSection('dreams')}
-                              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-white text-xs font-extrabold flex items-center gap-1 cursor-pointer shadow-xs"
+                              className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-extrabold flex items-center gap-1 cursor-pointer"
                             >
                               <span>Open Investments &amp; Dreams</span>
                               <ArrowRight className="w-3.5 h-3.5" />
@@ -4499,7 +4567,7 @@ export default function App() {
                               type="button"
                               data-testid="close-expanded-summary-panel"
                               onClick={() => setExpandedSummaryCard(null)}
-                              className="px-3 py-1.5 rounded-lg border border-yellow-500/40 text-xs font-bold text-yellow-800 dark:text-yellow-200 hover:bg-yellow-500/10 flex items-center gap-1 cursor-pointer"
+                              className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 cursor-pointer"
                             >
                               <X className="w-3.5 h-3.5" />
                               <span>Close</span>
@@ -4507,30 +4575,30 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* DIVIDED LEFT / RIGHT GOLDEN SECTIONS */}
+                        {/* DIVIDED LEFT / RIGHT SECTIONS (Only Individual Small Cards Inside Have Golden Theme) */}
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
                           {/* LEFT SECTION: DREAMS & FINANCIAL GOALS CARDS */}
                           <div
                             data-testid="expanded-investments-left-dreams"
-                            className="rounded-2xl border-2 border-yellow-500/40 bg-gradient-to-b from-yellow-500/10 via-white to-amber-500/5 dark:from-yellow-950/30 dark:via-slate-900 dark:to-slate-900 p-4 space-y-3 shadow-xs"
+                            className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 p-4 space-y-3"
                           >
-                            <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-yellow-500/30">
+                            <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-200 dark:border-slate-800">
                               <div>
-                                <div className="text-xs font-extrabold uppercase tracking-wider text-yellow-800 dark:text-yellow-300 flex items-center gap-1.5">
-                                  <Vault className="w-3.5 h-3.5 text-yellow-600 dark:text-yellow-400" />
+                                <div className="text-xs font-extrabold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                                  <Vault className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
                                   <span>Dreams &amp; Financial Goals ({leftDreamsCards.length})</span>
                                 </div>
-                                <p className="text-[11px] text-yellow-700/75 dark:text-yellow-400/75">
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400">
                                   Personal dreams, milestones &amp; reserve funds
                                 </p>
                               </div>
                               <div className="text-right">
-                                <div className="text-[10px] font-bold uppercase tracking-wider text-yellow-700 dark:text-yellow-400">
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                                   Saved in Dreams
                                 </div>
                                 <div
                                   data-testid="expanded-left-dreams-total"
-                                  className="text-sm font-extrabold font-mono text-yellow-700 dark:text-yellow-300"
+                                  className="text-sm font-extrabold font-mono text-slate-900 dark:text-white"
                                 >
                                   {currency}
                                   {leftDreamsSavedTotal.toLocaleString()}
@@ -4539,7 +4607,7 @@ export default function App() {
                             </div>
 
                             {leftDreamsCards.length === 0 ? (
-                              <div className="p-6 text-center text-xs text-yellow-800/70 dark:text-yellow-300/70 rounded-xl border border-dashed border-yellow-500/35 bg-yellow-500/5">
+                              <div className="p-6 text-center text-xs text-slate-500 dark:text-slate-400 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
                                 No Dream cards added yet. Add a Dream Investment or Goal in the Investments &amp; Dreams tab.
                               </div>
                             ) : (
@@ -4552,27 +4620,27 @@ export default function App() {
                           {/* RIGHT SECTION: INVESTMENTS & FIXED DEPOSITS CARDS */}
                           <div
                             data-testid="expanded-investments-right-investments"
-                            className="rounded-2xl border-2 border-yellow-500/40 bg-gradient-to-b from-amber-500/10 via-white to-yellow-500/5 dark:from-amber-950/30 dark:via-slate-900 dark:to-slate-900 p-4 space-y-3 shadow-xs"
+                            className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 p-4 space-y-3"
                           >
-                            <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-yellow-500/30">
+                            <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-200 dark:border-slate-800">
                               <div>
-                                <div className="text-xs font-extrabold uppercase tracking-wider text-yellow-800 dark:text-yellow-300 flex items-center gap-1.5">
-                                  <Landmark className="w-3.5 h-3.5 text-yellow-600 dark:text-yellow-400" />
+                                <div className="text-xs font-extrabold uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                                  <Landmark className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
                                   <span>
                                     Investments &amp; Fixed Deposits ({rightInvestmentsCards.length})
                                   </span>
                                 </div>
-                                <p className="text-[11px] text-yellow-700/75 dark:text-yellow-400/75">
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400">
                                   Fixed Deposits (FDs), Gold, Mutual Funds &amp; SIPs
                                 </p>
                               </div>
                               <div className="text-right">
-                                <div className="text-[10px] font-bold uppercase tracking-wider text-yellow-700 dark:text-yellow-400">
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                                   Total Invested
                                 </div>
                                 <div
                                   data-testid="expanded-right-investments-total"
-                                  className="text-sm font-extrabold font-mono text-yellow-700 dark:text-yellow-300"
+                                  className="text-sm font-extrabold font-mono text-slate-900 dark:text-white"
                                 >
                                   {currency}
                                   {rightInvestmentsSavedTotal.toLocaleString()}
@@ -4581,7 +4649,7 @@ export default function App() {
                             </div>
 
                             {rightInvestmentsCards.length === 0 ? (
-                              <div className="p-6 text-center text-xs text-yellow-800/70 dark:text-yellow-300/70 rounded-xl border border-dashed border-yellow-500/35 bg-yellow-500/5">
+                              <div className="p-6 text-center text-xs text-slate-500 dark:text-slate-400 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
                                 No Investment or FD cards added yet. Add a Fixed Deposit, Gold, or Mutual Fund card in Investments &amp; Dreams.
                               </div>
                             ) : (
@@ -4856,6 +4924,9 @@ export default function App() {
                           const toAcc = tx.toAccountId
                             ? vault.accounts.find((a) => a.id === tx.toAccountId)
                             : undefined;
+                          const linkedDreamVault = tx.dreamVaultId
+                            ? vault.dreamVaults.find((d) => d.id === tx.dreamVaultId)
+                            : undefined;
                           const person = vault.people.find((p) => p.id === tx.personId);
                           const linkedRec = tx.linkedRecurringId
                             ? (vault.recurringPayments || []).find(
@@ -4872,6 +4943,7 @@ export default function App() {
                             tx.type === 'borrowing_in' ||
                             tx.type === 'expected_incoming';
                           const isTransfer = tx.type === 'transfer';
+                          const isDreamInvestment = tx.type === 'dream_investment';
 
                           return (
                             <tr
@@ -4891,11 +4963,29 @@ export default function App() {
                                 <div className="font-semibold text-slate-900 dark:text-slate-100">
                                   {tx.title}
                                 </div>
-                                {(tx.isPaidEmi || tx.isRegularMonthly || isTransfer || tx.isSplit) && (
+                                {(tx.isPaidEmi ||
+                                  tx.isRegularMonthly ||
+                                  isTransfer ||
+                                  isDreamInvestment ||
+                                  tx.isSplit) && (
                                   <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                                     {isTransfer && (
                                       <span className="px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold">
                                         Transfer
+                                      </span>
+                                    )}
+                                    {isDreamInvestment && (
+                                      <span
+                                        data-testid={`record-investment-badge-${tx.id}`}
+                                        className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-800 dark:text-amber-300 text-[10px] font-extrabold"
+                                      >
+                                        {linkedDreamVault
+                                          ? `${
+                                              isPureInvestmentVault(linkedDreamVault)
+                                                ? 'Investment'
+                                                : 'Dream'
+                                            }: ${linkedDreamVault.name}`
+                                          : 'Investment / Dream'}
                                       </span>
                                     )}
                                     {tx.isPaidEmi && (
@@ -4951,7 +5041,11 @@ export default function App() {
                               <td className="py-3 px-3 whitespace-normal break-words">
                                 <div className="text-slate-800 dark:text-slate-200 font-medium">
                                   {acc?.name || 'Primary Wallet'}
-                                  {toAcc ? ` → ${toAcc.name}` : ''}
+                                  {toAcc
+                                    ? ` → ${toAcc.name}`
+                                    : linkedDreamVault
+                                    ? ` → ${linkedDreamVault.name}`
+                                    : ''}
                                 </div>
                                 <div className="text-[11px] text-slate-500">{methodLabel}</div>
                               </td>
@@ -5122,6 +5216,7 @@ export default function App() {
             <DreamVaultsView
               dreamVaults={vault.dreamVaults}
               accounts={vault.accounts}
+              transactions={vault.transactions}
               currency={currency}
               isAdminPortal={isAdminPortal}
               readOnlyMode={isAccountOnHold}

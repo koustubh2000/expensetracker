@@ -2512,4 +2512,29 @@ export function calculateLoanAmortizationSchedule(loan: LoanRecord): LoanAmortiz
   };
 }
 
-
+/**
+ * Classifies whether a DreamVault item belongs to the "Investment" section
+ * (Fixed Deposits, Mutual Funds & SIP, Equity, Gold & Bullion, Lending Pool)
+ * versus the "Dreams" section (Dream Investment goals like Laptop, Vacation, Real Estate Goal, Emergency Fund).
+ */
+export function isPureInvestmentVault(dv: DreamVault): boolean {
+  if (
+    dv.storageType === 'Fixed Deposit (FD)' ||
+    dv.storageType === 'Mutual Funds & SIP' ||
+    dv.storageType === 'Equity & Mutual Funds' ||
+    dv.storageType === 'Gold & Bullion' ||
+    dv.storageType === 'Lending Pool'
+  ) {
+    return true;
+  }
+  if (
+    dv.storageType === 'Other' &&
+    dv.customStorageType &&
+    /\b(fd|fixed deposit|sip|mutual fund|gold|bullion|equity|stock|bond|ppf|nps|rd|investment)\b/i.test(
+      dv.customStorageType
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
