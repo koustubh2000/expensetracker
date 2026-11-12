@@ -12,6 +12,7 @@ import {
   ClipboardPaste,
   Split,
   AlertTriangle,
+  Sparkles,
 } from 'lucide-react';
 import {
   DreamVault,
@@ -25,6 +26,7 @@ import {
 import {
   calculateLoanAmortizationSchedule,
   DEFAULT_CATEGORIES,
+  isPureInvestmentVault,
   PAYMENT_METHODS,
 } from '../utils/financeRules';
 import {
@@ -75,13 +77,14 @@ interface TransactionModalProps {
 }
 
 type PrimaryFlowMode = 'expense' | 'income' | 'transfer';
-type TransferSubMode = 'self_transfer' | 'emi_paid';
+type TransferSubMode = 'self_transfer' | 'investment' | 'emi_paid';
 
 export const TransactionModal: React.FC<TransactionModalProps> = ({
   isOpen,
   onClose,
   accounts,
   people = [],
+  dreamVaults = [],
   loans = [],
   recurringPayments = [],
   currency = '₹',
@@ -108,6 +111,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [accountId, setAccountId] = useState(accounts[0]?.id || '');
   const [autoAccountName, setAutoAccountName] = useState('Primary Bank Account');
   const [toAccountId, setToAccountId] = useState(accounts[1]?.id || accounts[0]?.id || '');
+  const [selectedDreamVaultId, setSelectedDreamVaultId] = useState<string>(
+    dreamVaults[0]?.id || ''
+  );
   const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS[0]);
   const [customPaymentMethod, setCustomPaymentMethod] = useState('');
   const [isRegularMonthly, setIsRegularMonthly] = useState(false);
@@ -233,6 +239,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         setPrimaryFlow('transfer');
         setTransferSubMode('emi_paid');
         setIsPaidEmi(true);
+      } else if (txType === 'dream_investment' || editingTransaction.dreamVaultId) {
+        setPrimaryFlow('transfer');
+        setTransferSubMode('investment');
+        setIsPaidEmi(false);
+        setSelectedDreamVaultId(
+          editingTransaction.dreamVaultId || dreamVaults[0]?.id || ''
+        );
       } else if (txType === 'transfer') {
         setPrimaryFlow('transfer');
         setTransferSubMode('self_transfer');
@@ -306,6 +319,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setCustomCategory('');
       setAccountId(accounts[0]?.id || '');
       setToAccountId(accounts[1]?.id || accounts[0]?.id || '');
+      setSelectedDreamVaultId(dreamVaults[0]?.id || '');
       setPaymentMethod(PAYMENT_METHODS[0]);
       setCustomPaymentMethod('');
       setIsRegularMonthly(false);
@@ -326,7 +340,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setMarkAsPaidInLoanSection(true);
       setError('');
     }
-  }, [editingTransaction, isOpen, accounts, initialIsPaidEmi, people]);
+  }, [editingTransaction, isOpen, accounts, initialIsPaidEmi, people, dreamVaults]);
 
   if (!isOpen) return null;
 
@@ -353,10 +367,41 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         setType('expense');
         setIsPaidEmi(true);
         setCategory('Utilities & Bills');
+      } else if (transferSubMode === 'investment') {
+        setType('dream_investment');
+        setIsPaidEmi(false);
+        setCategory(DEFAULT_CATEGORIES.transfer[0]);
+        if (!selectedDreamVaultId && dreamVaults.length > 0) {
+          setSelectedDreamVaultId(dreamVaults[0].id);
+        }
       } else {
         setType('transfer');
         setIsPaidEmi(false);
         setCategory(DEFAULT_CATEGORIES.transfer[0]);
+      }
+    }
+  };
+
+  const handleDreamVaultSelectChange = (chosenVaultId: string) => {
+    setSelectedDreamVaultId(chosenVaultId);
+    const chosenVault = dreamVaults.find((v) => v.id === chosenVaultId);
+    if (chosenVault) {
+      const isInv = isPureInvestmentVault(chosenVault);
+      if (
+        !title.trim() ||
+        title === 'Self Account Transfer' ||
+        title.startsWith('Paid EMI:') ||
+        title.startsWith('Investment:') ||
+        title.startsWith('Dream Allocation:')
+      ) {
+        setTitle(
+          isInv
+            ? `Investment: ${chosenVault.name}`
+            : `Dream Allocation: ${chosenVault.name}`
+        );
+      }
+      if (chosenVault.linkedAccountId) {
+        setAccountId(chosenVault.linkedAccountId);
       }
     }
   };
@@ -368,8 +413,23 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setType('transfer');
       setIsPaidEmi(false);
       setCategory(DEFAULT_CATEGORIES.transfer[0]);
-      if (!title.trim() || title.startsWith('Paid EMI:')) {
+      if (
+        !title.trim() ||
+        title.startsWith('Paid EMI:') ||
+        title.startsWith('Investment:') ||
+        title.startsWith('Dream Allocation:')
+      ) {
         setTitle('Self Account Transfer');
+      }
+    } else if (sub === 'investment') {
+      setType('dream_investment');
+      setIsPaidEmi(false);
+      setCategory(DEFAULT_CATEGORIES.transfer[0]);
+      const targetId = selectedDreamVaultId || dreamVaults[0]?.id || '';
+      if (targetId) {
+        handleDreamVaultSelectChange(targetId);
+      } else if (!title.trim() || title === 'Self Account Transfer' || title.startsWith('Paid EMI:')) {
+        setTitle('Investment Allocation');
       }
     } else {
       setType('expense');
@@ -440,11 +500,18 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const isEmiPaidFlowActive =
     primaryFlow === 'transfer' && transferSubMode === 'emi_paid';
 
+  const isInvestmentTransferActive =
+    primaryFlow === 'transfer' && transferSubMode === 'investment';
+
   const isSameSelfTransferAccount =
     primaryFlow === 'transfer' &&
     transferSubMode === 'self_transfer' &&
     Boolean(accountId) &&
     accountId === toAccountId;
+
+  const selectedDreamVaultObj = dreamVaults.find(
+    (v) => v.id === selectedDreamVaultId
+  );
 
   const grossNumeric = Math.max(0, Number(amount) || 0);
   const splitNumeric = isSplit ? Math.max(0, Number(splitAmount) || 0) : 0;
@@ -470,6 +537,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     if (primaryFlow === 'transfer' && transferSubMode === 'self_transfer') {
       if (accountId === toAccountId) {
         setError('Same account selected — transfer between identical accounts is not possible.');
+        return;
+      }
+    }
+
+    if (isInvestmentTransferActive) {
+      if (!selectedDreamVaultId) {
+        setError('Please select an Investment or Dream card to allocate this transfer to.');
         return;
       }
     }
@@ -530,14 +604,15 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       : accountId || accounts[0]?.id || '';
 
     const effectiveDate = isEmiPaidFlowActive ? emiPaymentDate || date : date;
-    const effectiveType: TransactionType =
-      primaryFlow === 'transfer' && transferSubMode === 'self_transfer'
-        ? 'transfer'
-        : isEmiPaidFlowActive
-        ? 'expense'
-        : primaryFlow === 'income'
-        ? 'income'
-        : 'expense';
+    const effectiveType: TransactionType = isInvestmentTransferActive
+      ? 'dream_investment'
+      : primaryFlow === 'transfer' && transferSubMode === 'self_transfer'
+      ? 'transfer'
+      : isEmiPaidFlowActive
+      ? 'expense'
+      : primaryFlow === 'income'
+      ? 'income'
+      : 'expense';
 
     // Always record the full paid amount in Main Records; the split portion is tracked as a Receivable in Receivables & Payables
     const finalRecordAmount = Math.round(numAmount * 100) / 100;
@@ -554,6 +629,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         primaryFlow === 'transfer' && transferSubMode === 'self_transfer'
           ? toAccountId
           : undefined,
+      dreamVaultId: isInvestmentTransferActive ? selectedDreamVaultId : undefined,
       paymentMethod:
         fundingBankAccountId === 'CASH_DIRECT' && isEmiPaidFlowActive
           ? 'Physical Cash'
@@ -670,7 +746,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               <div className="space-y-1.5">
                 <span className="flex items-center text-xs font-bold text-slate-700 dark:text-slate-300">
                   <span>Flow Type</span>
-                  <InfoTip text="Choose Expense, Income, or Transfer (Self Transfer / EMI Paid)." />
+                  <InfoTip text="Choose Expense, Income, or Transfer (Self Transfer / Investment / EMI Paid)." />
                 </span>
 
                 <div
@@ -721,7 +797,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 </div>
               </div>
 
-              {/* IF TRANSFER SELECTED: Sub-Option Selector -> "Self Transfer" OR "EMI Paid" */}
+              {/* IF TRANSFER SELECTED: Sub-Option Selector -> "Self Transfer", "Investment", OR "EMI Paid" */}
               {primaryFlow === 'transfer' && (
                 <div
                   data-testid="transfer-sub-option-selector"
@@ -730,9 +806,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-extrabold text-indigo-900 dark:text-indigo-200 flex items-center">
                       <span>Transfer Mode</span>
-                      <InfoTip text="Move funds between your own accounts (Self Transfer) or record a loan EMI payment." />
+                      <InfoTip text="Move funds between your own accounts (Self Transfer), allocate to an Investment or Dream card (Investment), or record a loan EMI payment." />
                     </span>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2 w-full sm:w-auto">
                       <button
                         type="button"
                         data-testid="transfer-sub-self-btn"
@@ -745,6 +821,20 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                       >
                         <ArrowRightLeft className="w-3.5 h-3.5" />
                         <span>Self Transfer</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="transfer-sub-investment-btn"
+                        onClick={() => handleTransferSubModeSelect('investment')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border flex items-center justify-center gap-1.5 cursor-pointer ${
+                          transferSubMode === 'investment'
+                            ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                            : 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 border-amber-500/40'
+                        }`}
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Investment</span>
                       </button>
 
                       <button
@@ -763,7 +853,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Sub-Option A: Self Transfer -> From Which Account to Which Account */}
+                  {/* Sub-Option A: Self Transfer -> From Which Account to Which Account (or Investment) */}
                   {transferSubMode === 'self_transfer' && (
                     <div
                       data-testid="self-transfer-accounts-box"
@@ -790,19 +880,46 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
                         <div>
                           <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                            To Account
+                            To Account / Investment
                           </label>
                           <select
                             data-testid="transfer-to-account-select"
                             value={toAccountId}
-                            onChange={(e) => setToAccountId(e.target.value)}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === '__INVESTMENT_MODE__') {
+                                handleTransferSubModeSelect('investment');
+                              } else if (val.startsWith('DREAM_VAULT:')) {
+                                const dvId = val.replace('DREAM_VAULT:', '');
+                                setTransferSubMode('investment');
+                                setType('dream_investment');
+                                setIsPaidEmi(false);
+                                setCategory(DEFAULT_CATEGORIES.transfer[0]);
+                                handleDreamVaultSelectChange(dvId);
+                              } else {
+                                setToAccountId(val);
+                              }
+                            }}
                             className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
                           >
-                            {accounts.map((acc) => (
-                              <option key={acc.id} value={acc.id}>
-                                {acc.name} ({acc.type})
+                            <optgroup label="My Accounts & Wallets">
+                              {accounts.map((acc) => (
+                                <option key={acc.id} value={acc.id}>
+                                  {acc.name} ({acc.type})
+                                </option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="Investment & Dreams">
+                              <option value="__INVESTMENT_MODE__">
+                                ★ Investment (Choose from Investments &amp; Dreams List)
                               </option>
-                            ))}
+                              {dreamVaults.map((dv) => (
+                                <option key={dv.id} value={`DREAM_VAULT:${dv.id}`}>
+                                  {isPureInvestmentVault(dv) ? 'Investment' : 'Dream'}: {dv.name} (Saved: {currency}
+                                  {dv.currentAmount.toLocaleString()})
+                                </option>
+                              ))}
+                            </optgroup>
                           </select>
                         </div>
                       </div>
@@ -814,6 +931,106 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                         >
                           <AlertTriangle className="w-4 h-4 shrink-0" />
                           <span>Same account selected — no transfer possible</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Sub-Option B: Investment -> Select From Account & Investment / Dream Card */}
+                  {transferSubMode === 'investment' && (
+                    <div
+                      data-testid="transfer-investment-box"
+                      className="space-y-3 p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-500/40"
+                    >
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                            From Account (Debit From)
+                          </label>
+                          <select
+                            data-testid="transfer-investment-from-account-select"
+                            value={accountId}
+                            onChange={(e) => setAccountId(e.target.value)}
+                            className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+                          >
+                            {accounts.map((acc) => (
+                              <option key={acc.id} value={acc.id}>
+                                {acc.name} ({acc.type})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-amber-900 dark:text-amber-200 mb-1">
+                            Investment &amp; Dreams List
+                          </label>
+                          <select
+                            data-testid="transfer-investment-vault-select"
+                            value={selectedDreamVaultId}
+                            onChange={(e) => handleDreamVaultSelectChange(e.target.value)}
+                            className="w-full px-3 py-2 text-xs font-bold rounded-lg border border-amber-500/50 bg-white dark:bg-slate-950 text-slate-900 dark:text-white"
+                          >
+                            {dreamVaults.length === 0 ? (
+                              <option value="">-- No Investment or Dream Cards Found --</option>
+                            ) : (
+                              <>
+                                <option value="">-- Select Investment or Dream Card --</option>
+                                {dreamVaults.some((d) => isPureInvestmentVault(d)) && (
+                                  <optgroup label="Investments (FD, Gold, Mutual Funds)">
+                                    {dreamVaults
+                                      .filter((d) => isPureInvestmentVault(d))
+                                      .map((dv) => (
+                                        <option key={dv.id} value={dv.id}>
+                                          {dv.name} ({dv.storageType}) — Saved: {currency}
+                                          {dv.currentAmount.toLocaleString()}
+                                        </option>
+                                      ))}
+                                  </optgroup>
+                                )}
+                                {dreamVaults.some((d) => !isPureInvestmentVault(d)) && (
+                                  <optgroup label="Dreams & Goals (Laptop, Emergency, Goals)">
+                                    {dreamVaults
+                                      .filter((d) => !isPureInvestmentVault(d))
+                                      .map((dv) => (
+                                        <option key={dv.id} value={dv.id}>
+                                          {dv.name} ({dv.storageType}) — Saved: {currency}
+                                          {dv.currentAmount.toLocaleString()} / Target: {currency}
+                                          {dv.targetAmount.toLocaleString()}
+                                        </option>
+                                      ))}
+                                  </optgroup>
+                                )}
+                              </>
+                            )}
+                          </select>
+                        </div>
+                      </div>
+
+                      {selectedDreamVaultObj && (
+                        <div
+                          data-testid="transfer-investment-preview"
+                          className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-amber-500/30 flex flex-wrap items-center justify-between gap-2 text-xs"
+                        >
+                          <div>
+                            <span className="font-extrabold text-amber-800 dark:text-amber-300">
+                              {selectedDreamVaultObj.name}
+                            </span>
+                            <span className="ml-1.5 text-[11px] text-slate-500">
+                              ({isPureInvestmentVault(selectedDreamVaultObj) ? 'Investment' : 'Dream'} · {selectedDreamVaultObj.storageType})
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 font-mono text-[11px]">
+                            <span className="text-slate-600 dark:text-slate-400">
+                              Current: <strong>{currency}{selectedDreamVaultObj.currentAmount.toLocaleString()}</strong>
+                            </span>
+                            {grossNumeric > 0 && (
+                              <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                                New Total: {currency}
+                                {(selectedDreamVaultObj.currentAmount + grossNumeric).toLocaleString()}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>

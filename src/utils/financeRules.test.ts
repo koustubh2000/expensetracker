@@ -1475,3 +1475,119 @@ test('calculateDashboardSummaryCards syncs Expected Money Coming In and The Mone
   assert.equal(summary.livePayableRecords.length, 1);
   assert.equal(summary.livePayableRecords[0].remainingAmount, 1000);
 });
+
+import { isPureInvestmentVault } from './financeRules';
+
+test('isPureInvestmentVault classifies Investment cards vs Dreams cards and links dream_investment records accurately', () => {
+  const fdCard = {
+    id: 'dv-fd',
+    name: 'FD',
+    storageType: 'Fixed Deposit (FD)' as const,
+    targetAmount: 10000,
+    currentAmount: 10000,
+    monthlyPlannedContribution: 0,
+    targetDate: 'No Date',
+  };
+  const laptopDreamCard = {
+    id: 'dv-laptop',
+    name: 'MacBook Pro Laptop',
+    storageType: 'Dream Investment' as const,
+    targetAmount: 120000,
+    currentAmount: 30000,
+    monthlyPlannedContribution: 10000,
+    targetDate: '2027-08-01',
+  };
+
+  assert.equal(isPureInvestmentVault(fdCard), true);
+  assert.equal(isPureInvestmentVault(laptopDreamCard), false);
+
+  const bank: WalletAccount = {
+    id: 'acc-bob',
+    name: 'Bank of Baroda',
+    type: 'Bank Account',
+    currency: '₹',
+    initialBalance: 50000,
+    color: '#ea580c',
+    includeInNetWorth: true,
+  };
+
+  const transferToLaptopTx: TransactionRecord = {
+    id: '150',
+    date: '2026-11-12',
+    title: 'Dream Allocation: MacBook Pro Laptop',
+    amount: 15000,
+    type: 'dream_investment',
+    category: 'Self Account Transfer',
+    accountId: 'acc-bob',
+    dreamVaultId: 'dv-laptop',
+    paymentMethod: 'Bank Transfer (ACH / NEFT / Wire)',
+    status: 'completed',
+  };
+
+  // Account balance reflects the debit of 15,000 -> 35,000
+  assert.equal(calculateAccountBalance(bank, [transferToLaptopTx]), 35000);
+});
+
+test('ensureZeroKnowledgeUsers strips polluted test accounts and preserves canonical real users and password hashes', () => {
+  const realKoustubhHash =
+    'zk_sha256_v1$63c3f5e334ab41f9$1760054e028cf9507cc6c80bdfc1a533665ccb91e25c55465190e767e3536223';
+  const realTejashreeHash =
+    'zk_sha256_v1$bafed41034ab425f$c85ba80986c033607280ee78a9fe4dd1645a7a633c70b1059f2f0381ffda0bb9';
+
+  const inputUsers: UserAccount[] = [
+    {
+      id: 'user-verify-inv',
+      username: 'koustubh',
+      displayName: 'Koustubh Fake Duplicate',
+      passwordHash: 'Pass1234#',
+      role: 'user',
+      createdAt: '2026-11-12T14:18:47.477Z',
+      currency: '₹',
+      customCategories: [],
+    },
+    {
+      id: 'user-1794238795911',
+      username: 'koustubh',
+      displayName: 'Koustubh Juvekar',
+      passwordHash: realKoustubhHash,
+      role: 'user',
+      createdAt: '2026-11-09T15:39:55.911Z',
+      currency: '₹',
+      customCategories: ['Hotel', 'Petrol'],
+    },
+    {
+      id: 'user-1794219602604',
+      username: 'Tejashree',
+      displayName: 'Tejashree Pradhan',
+      passwordHash: realTejashreeHash,
+      role: 'user',
+      createdAt: '2026-11-09T10:20:02.604Z',
+      currency: '₹',
+      customCategories: ['Personal things'],
+    },
+    {
+      id: 'user-1794473621693',
+      username: 'koustubh_v_1099',
+      displayName: 'Polluted Test',
+      passwordHash: 'Pass1234#',
+      role: 'user',
+      createdAt: '2026-11-12T08:53:41.719Z',
+      currency: '₹',
+      customCategories: [],
+    },
+  ];
+
+  const { users: cleaned, upgraded } = ensureZeroKnowledgeUsers(inputUsers);
+  assert.equal(upgraded, true);
+  assert.equal(cleaned.length, 2);
+  const koustubh = cleaned.find((u) => u.username === 'koustubh');
+  assert.ok(koustubh);
+  assert.equal(koustubh.id, 'user-1794238795911');
+  assert.equal(koustubh.passwordHash, realKoustubhHash);
+  const tejashree = cleaned.find((u) => u.username === 'Tejashree');
+  assert.ok(tejashree);
+  assert.equal(tejashree.id, 'user-1794219602604');
+  assert.equal(tejashree.passwordHash, realTejashreeHash);
+});
+
+

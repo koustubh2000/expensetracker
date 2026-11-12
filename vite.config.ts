@@ -6,12 +6,12 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(({ command }) => {
   return {
-    base: command === 'build' ? './' : '/',
+    base: '/',
     plugins: [
       react(),
       tailwindcss(),
       VitePWA({
-        registerType: 'autoUpdate',
+        registerType: 'prompt',
         includeManifestIcons: true,
         manifest: {
           id: '/',
@@ -56,11 +56,9 @@ export default defineConfig(({ command }) => {
           ],
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           cleanupOutdatedCaches: true,
-          clientsClaim: true,
-          skipWaiting: true,
         },
         devOptions: {
-          enabled: true,
+          enabled: false,
           type: 'module',
         },
       }),

@@ -103,7 +103,10 @@ interface AdminPortalViewProps {
   ) => void;
   onAdminSendSupportMessage: (userId: string, text: string, updatedReason?: string) => void;
   onAdminCloseSupportIssue: (userId: string) => void;
-  onAdminPermanentlyDeleteUser: (userId: string) => void;
+  onAdminPermanentlyDeleteUser: (
+    userId: string,
+    adminPassword?: string
+  ) => { ok: boolean; error?: string } | void;
   onResetEntirePortal: (adminPassword: string) => { ok: boolean; error?: string };
   onTriggerFeedback: (
     message: string,
@@ -153,9 +156,12 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
   const [showResetPortalPass, setShowResetPortalPass] = useState<boolean>(false);
   const [resetPortalError, setResetPortalError] = useState<string>('');
 
-  // Confirm Permanent User Deletion Modal State (asks before deleting any user in Admin)
+  // Confirm Permanent User Deletion Modal State (requires Admin Password before deleting any user in Admin)
   const [userPendingPermanentDelete, setUserPendingPermanentDelete] =
     useState<UserAccount | null>(null);
+  const [adminDeleteUserPassword, setAdminDeleteUserPassword] = useState<string>('');
+  const [showAdminDeleteUserPass, setShowAdminDeleteUserPass] = useState<boolean>(false);
+  const [adminDeleteUserError, setAdminDeleteUserError] = useState<string>('');
 
   // Admin own password change state (with Free Lifetime Firebase Email OTP + Confirm Password)
   const [adminDisplayName, setAdminDisplayName] = useState(adminUser.displayName);
@@ -1485,9 +1491,14 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => setUserPendingPermanentDelete(u)}
+                                  onClick={() => {
+                                    setUserPendingPermanentDelete(u);
+                                    setAdminDeleteUserPassword('');
+                                    setShowAdminDeleteUserPass(false);
+                                    setAdminDeleteUserError('');
+                                  }}
                                   data-testid={`permanent-delete-btn-${u.username}`}
-                                  title="Ask confirmation and permanently delete user and vault"
+                                  title="Ask Admin password and permanently delete user and vault"
                                   className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-[11px] inline-flex items-center gap-1 cursor-pointer shadow-xs"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -1563,7 +1574,12 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
 
                                 <button
                                   type="button"
-                                  onClick={() => setUserPendingPermanentDelete(u)}
+                                  onClick={() => {
+                                    setUserPendingPermanentDelete(u);
+                                    setAdminDeleteUserPassword('');
+                                    setShowAdminDeleteUserPass(false);
+                                    setAdminDeleteUserError('');
+                                  }}
                                   data-testid={`permanent-delete-btn-${u.username}`}
                                   className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-[11px] inline-flex items-center gap-1 cursor-pointer shadow-xs"
                                 >
@@ -2916,7 +2932,7 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
         </div>
       )}
 
-      {/* CONFIRM PERMANENT USER DELETION MODAL (Asks before deleting any user in Admin) */}
+      {/* CONFIRM PERMANENT USER DELETION MODAL (Requires Admin Password before deleting any user in Admin) */}
       {userPendingPermanentDelete && (
         <div
           data-testid="admin-delete-user-confirm-modal"
@@ -2935,7 +2951,11 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => setUserPendingPermanentDelete(null)}
+                onClick={() => {
+                  setUserPendingPermanentDelete(null);
+                  setAdminDeleteUserPassword('');
+                  setAdminDeleteUserError('');
+                }}
                 className="p-1 rounded-lg text-white/80 hover:text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -2953,14 +2973,65 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
               <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-[11px] text-rose-700 dark:text-rose-300 font-semibold leading-relaxed">
                 This action will permanently remove @{userPendingPermanentDelete.username}&apos;s
                 account, login credentials, and entire financial vault from both Local Storage and
-                Firebase Cloud.
+                Firebase Cloud. Once deleted, it cannot be recovered.
+              </div>
+
+              <div>
+                <label
+                  htmlFor="admin-delete-user-password-input"
+                  className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5"
+                >
+                  Enter Admin Password to Confirm Deletion *
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    id="admin-delete-user-password-input"
+                    data-testid="admin-delete-user-password-input"
+                    type={showAdminDeleteUserPass ? 'text' : 'password'}
+                    value={adminDeleteUserPassword}
+                    onChange={(e) => {
+                      setAdminDeleteUserPassword(e.target.value);
+                      if (adminDeleteUserError) setAdminDeleteUserError('');
+                    }}
+                    placeholder="Enter your Admin password..."
+                    autoComplete="new-password"
+                    className="w-full pl-9 pr-10 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-medium text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-rose-500"
+                  />
+                  <button
+                    type="button"
+                    data-testid="toggle-admin-delete-user-pass"
+                    onClick={() => setShowAdminDeleteUserPass((prev) => !prev)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                    aria-label={showAdminDeleteUserPass ? 'Hide password' : 'Show password'}
+                  >
+                    {showAdminDeleteUserPass ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+                {adminDeleteUserError && (
+                  <p
+                    data-testid="admin-delete-user-error"
+                    className="mt-1.5 text-[11px] font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1"
+                  >
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{adminDeleteUserError}</span>
+                  </p>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-2.5 pt-2">
                 <button
                   type="button"
                   data-testid="cancel-admin-delete-user-btn"
-                  onClick={() => setUserPendingPermanentDelete(null)}
+                  onClick={() => {
+                    setUserPendingPermanentDelete(null);
+                    setAdminDeleteUserPassword('');
+                    setAdminDeleteUserError('');
+                  }}
                   className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold cursor-pointer"
                 >
                   Cancel
@@ -2969,11 +3040,34 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                   type="button"
                   data-testid="confirm-admin-delete-user-btn"
                   onClick={() => {
+                    if (!adminDeleteUserPassword.trim()) {
+                      setAdminDeleteUserError(
+                        'Please enter your Admin password to confirm deleting this account.'
+                      );
+                      return;
+                    }
+                    if (
+                      !verifySecretAgainstStoredHash(
+                        adminDeleteUserPassword,
+                        adminUser.passwordHash
+                      )
+                    ) {
+                      setAdminDeleteUserError('Incorrect Admin password. Deletion cancelled.');
+                      return;
+                    }
                     const target = userPendingPermanentDelete;
+                    const res = onAdminPermanentlyDeleteUser(target.id, adminDeleteUserPassword);
+                    if (res && typeof res === 'object' && 'ok' in res && !res.ok) {
+                      setAdminDeleteUserError(
+                        res.error || 'Incorrect Admin password. Deletion cancelled.'
+                      );
+                      return;
+                    }
                     setUserPendingPermanentDelete(null);
-                    onAdminPermanentlyDeleteUser(target.id);
+                    setAdminDeleteUserPassword('');
+                    setAdminDeleteUserError('');
                     setStatusBanner(
-                      `Permanently deleted @${target.username} and all associated vault data.`
+                      `Permanently deleted @${target.username} and all associated vault data from Local & Firebase Cloud.`
                     );
                     onTriggerFeedback(
                       `@${target.username} Deleted Permanently`,
