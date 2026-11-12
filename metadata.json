@@ -1,0 +1,8 @@
+{
+  "name": "PocketLedger Vault — Offline Personal Finance & Bill Manager",
+  "description": "An offline-first personal finance, multi-account wallet, dream investment tracker, lending ledger, and bill exporter inspired by Wallet by BudgetBakers with local file/folder database storage and desktop app support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

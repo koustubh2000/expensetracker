@@ -1,0 +1,488 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User workspace preferences and display configuration without raw PII.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the profile owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name shown on dashboard and exported bills.",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "currency": {
+          "type": "string",
+          "description": "Preferred currency symbol or code.",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "role": {
+          "type": "string",
+          "description": "User role in the workspace.",
+          "enum": ["user", "admin"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": ["ownerId", "displayName", "currency", "role", "createdAt", "updatedAt"]
+    },
+    "GlobalConfig": {
+      "title": "GlobalConfig",
+      "description": "Cross-device global portal configuration for Front Page hero image and PDF header layout.",
+      "type": "object",
+      "properties": {
+        "configId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "landingHeroImage": {
+          "type": "string",
+          "maxLength": 900000
+        },
+        "pdfHeaderJson": {
+          "type": "string",
+          "maxLength": 900000
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["configId", "landingHeroImage", "pdfHeaderJson", "updatedAt"]
+    },
+    "AppUserSync": {
+      "title": "AppUserSync",
+      "description": "Cross-device synchronized user account and admin credential record.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "admin"]
+        },
+        "userJson": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 600000
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "username", "role", "userJson", "updatedAt"]
+    },
+    "UserVaultSync": {
+      "title": "UserVaultSync",
+      "description": "Cross-device synchronized financial vault for a user account.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "vaultJson": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 950000
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "vaultJson", "updatedAt"]
+    },
+    "WalletAccount": {
+      "title": "WalletAccount",
+      "description": "Financial account or wallet card (Bank, Cash, Credit Card, Investment, or Other).",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "customType": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "currency": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "initialBalance": {
+          "type": "number"
+        },
+        "color": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "includeInNetWorth": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "name", "type", "currency", "initialBalance", "color", "includeInNetWorth", "createdAt", "updatedAt"]
+    },
+    "TransactionRecord": {
+      "title": "TransactionRecord",
+      "description": "Financial transaction record supporting income, expense, transfer, dream investment, lending, expected incoming, and custom Other flows.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "date": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "amount": {
+          "type": "number"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["income", "expense", "transfer", "dream_investment", "lending_out", "borrowing_in", "expected_incoming", "other"]
+        },
+        "customTypeLabel": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "customCategory": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "toAccountId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "paymentMethod": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "customPaymentMethod": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "personId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "dreamVaultId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "status": {
+          "type": "string",
+          "enum": ["completed", "expected", "settled", "partial"]
+        },
+        "billable": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "proofId": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "proofImageName": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "date", "title", "amount", "type", "category", "accountId", "paymentMethod", "status", "createdAt", "updatedAt"]
+    },
+    "PersonProfile": {
+      "title": "PersonProfile",
+      "description": "Counterparty or person for lending, borrowing, expected receivables, and bill generation.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "relationship": {
+          "type": "string",
+          "enum": ["Client", "Friend", "Family", "Colleague", "Tenant", "Borrower", "Lender", "Other"]
+        },
+        "customRelationship": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "contactHandle": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "name", "relationship", "createdAt", "updatedAt"]
+    },
+    "ExpectedItem": {
+      "title": "ExpectedItem",
+      "description": "Expected receivable or lending item attached to a person for bill export and settlement.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "personId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "amount": {
+          "type": "number"
+        },
+        "settledAmount": {
+          "type": "number"
+        },
+        "direction": {
+          "type": "string",
+          "enum": ["expecting_from", "lent_to", "borrowed_from", "other"]
+        },
+        "customDirection": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "customCategory": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "date": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "dueDate": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "linkedTransactionId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "partial", "settled"]
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "personId", "title", "amount", "settledAmount", "direction", "category", "date", "dueDate", "status", "createdAt", "updatedAt"]
+    },
+    "DreamVault": {
+      "title": "DreamVault",
+      "description": "Money storage goal for dream investments, emergency funds, lending pools, or custom Other pots.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "storageType": {
+          "type": "string",
+          "enum": ["Dream Investment", "Emergency Fund", "Real Estate Goal", "Equity & Mutual Funds", "Gold & Bullion", "Lending Pool", "Incoming Reserve", "Other"]
+        },
+        "customStorageType": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "targetAmount": {
+          "type": "number"
+        },
+        "currentAmount": {
+          "type": "number"
+        },
+        "monthlyPlannedContribution": {
+          "type": "number"
+        },
+        "targetDate": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "linkedAccountId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "name", "storageType", "targetAmount", "currentAmount", "monthlyPlannedContribution", "targetDate", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/globalConfig/{configId}": {
+      "schema": { "$ref": "#/entities/GlobalConfig" },
+      "description": "Global Front Page hero photo and PDF header configuration synced across all devices."
+    },
+    "/appUsers/{userId}": {
+      "schema": { "$ref": "#/entities/AppUserSync" },
+      "description": "User accounts, Admin passwords, and 1-time temporary passwords synced across all devices."
+    },
+    "/userVaults/{userId}": {
+      "schema": { "$ref": "#/entities/UserVaultSync" },
+      "description": "Per-user financial vaults synced across all devices."
+    },
+    "/profiles/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Per-user workspace preferences keyed by Firebase Auth UID."
+    },
+    "/accounts/{accountId}": {
+      "schema": { "$ref": "#/entities/WalletAccount" },
+      "description": "Multi-account wallet cards owned by a user."
+    },
+    "/transactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/TransactionRecord" },
+      "description": "Financial ledger transactions owned by a user."
+    },
+    "/people/{personId}": {
+      "schema": { "$ref": "#/entities/PersonProfile" },
+      "description": "People and counterparties for lending, receivables, and bill exports."
+    },
+    "/expectedItems/{itemId}": {
+      "schema": { "$ref": "#/entities/ExpectedItem" },
+      "description": "Expected receivables and lending bill line items."
+    },
+    "/dreamVaults/{vaultId}": {
+      "schema": { "$ref": "#/entities/DreamVault" },
+      "description": "Dream investment and money storage vaults."
+    }
+  }
+}

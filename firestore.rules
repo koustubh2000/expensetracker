@@ -1,0 +1,350 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    function incoming() {
+      return request.resource.data;
+    }
+    function existing() {
+      return resource.data;
+    }
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'koustubhjuvekar2000@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidGlobalConfig(data, configId) {
+      return data.keys().hasAll(['configId', 'landingHeroImage', 'pdfHeaderJson', 'updatedAt']) &&
+        data.keys().hasOnly(['configId', 'landingHeroImage', 'pdfHeaderJson', 'updatedAt']) &&
+        data.configId == configId &&
+        isValidId(data.configId) &&
+        data.landingHeroImage is string && data.landingHeroImage.size() <= 900000 &&
+        data.pdfHeaderJson is string && data.pdfHeaderJson.size() >= 2 && data.pdfHeaderJson.size() <= 900000 &&
+        data.updatedAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidAppUserSync(data, userId) {
+      return data.keys().hasAll(['userId', 'username', 'role', 'userJson', 'updatedAt']) &&
+        data.keys().hasOnly(['userId', 'username', 'role', 'userJson', 'updatedAt']) &&
+        data.userId == userId &&
+        isValidId(data.userId) &&
+        data.username is string && data.username.size() >= 1 && data.username.size() <= 100 &&
+        data.role is string && (data.role == 'user' || data.role == 'admin') &&
+        data.userJson is string && data.userJson.size() >= 2 && data.userJson.size() <= 600000 &&
+        data.updatedAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidUserVaultSync(data, userId) {
+      return data.keys().hasAll(['userId', 'vaultJson', 'updatedAt']) &&
+        data.keys().hasOnly(['userId', 'vaultJson', 'updatedAt']) &&
+        data.userId == userId &&
+        isValidId(data.userId) &&
+        data.vaultJson is string && data.vaultJson.size() >= 2 && data.vaultJson.size() <= 950000 &&
+        data.updatedAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['ownerId', 'displayName', 'currency', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'displayName', 'currency', 'role', 'createdAt', 'updatedAt']) &&
+        data.ownerId == request.auth.uid &&
+        isValidId(data.ownerId) &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+        data.currency is string && data.currency.size() >= 1 && data.currency.size() <= 16 &&
+        data.role is string && (data.role == 'user' || data.role == 'admin') &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidWalletAccount(data) {
+      return data.keys().hasAll(['ownerId', 'name', 'type', 'currency', 'initialBalance', 'color', 'includeInNetWorth', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'name', 'type', 'customType', 'currency', 'initialBalance', 'color', 'includeInNetWorth', 'createdAt', 'updatedAt']) &&
+        data.ownerId == request.auth.uid &&
+        isValidId(data.ownerId) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+        data.type is string && data.type.size() >= 1 && data.type.size() <= 60 &&
+        (!('customType' in data) || (data.customType is string && data.customType.size() <= 80)) &&
+        data.currency is string && data.currency.size() >= 1 && data.currency.size() <= 16 &&
+        data.initialBalance is number && data.initialBalance >= -1000000000 && data.initialBalance <= 1000000000 &&
+        data.color is string && data.color.size() >= 1 && data.color.size() <= 32 &&
+        data.includeInNetWorth is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidTransactionRecord(data) {
+      return data.keys().hasAll(['ownerId', 'date', 'title', 'amount', 'type', 'category', 'accountId', 'paymentMethod', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'date', 'title', 'amount', 'type', 'customTypeLabel', 'category', 'customCategory', 'accountId', 'toAccountId', 'paymentMethod', 'customPaymentMethod', 'personId', 'dreamVaultId', 'status', 'billable', 'notes', 'proofId', 'proofImageName', 'createdAt', 'updatedAt']) &&
+        data.ownerId == request.auth.uid &&
+        isValidId(data.ownerId) &&
+        data.date is string && data.date.size() >= 1 && data.date.size() <= 32 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+        data.amount is number && data.amount > 0 && data.amount <= 1000000000 &&
+        data.type is string && data.type in ['income', 'expense', 'transfer', 'dream_investment', 'lending_out', 'borrowing_in', 'expected_incoming', 'other'] &&
+        (!('customTypeLabel' in data) || (data.customTypeLabel is string && data.customTypeLabel.size() <= 80)) &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 100 &&
+        (!('customCategory' in data) || (data.customCategory is string && data.customCategory.size() <= 100)) &&
+        isValidId(data.accountId) &&
+        (!('toAccountId' in data) || isValidId(data.toAccountId)) &&
+        data.paymentMethod is string && data.paymentMethod.size() >= 1 && data.paymentMethod.size() <= 100 &&
+        (!('customPaymentMethod' in data) || (data.customPaymentMethod is string && data.customPaymentMethod.size() <= 100)) &&
+        (!('personId' in data) || isValidId(data.personId)) &&
+        (!('dreamVaultId' in data) || isValidId(data.dreamVaultId)) &&
+        data.status is string && data.status in ['completed', 'expected', 'settled', 'partial'] &&
+        (!('billable' in data) || data.billable is bool) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 400)) &&
+        (!('proofId' in data) || (data.proofId is string && data.proofId.size() <= 64)) &&
+        (!('proofImageName' in data) || (data.proofImageName is string && data.proofImageName.size() <= 160)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidPersonProfile(data) {
+      return data.keys().hasAll(['ownerId', 'name', 'relationship', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'name', 'relationship', 'customRelationship', 'contactHandle', 'notes', 'createdAt', 'updatedAt']) &&
+        data.ownerId == request.auth.uid &&
+        isValidId(data.ownerId) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.relationship is string && data.relationship in ['Client', 'Friend', 'Family', 'Colleague', 'Tenant', 'Borrower', 'Lender', 'Other'] &&
+        (!('customRelationship' in data) || (data.customRelationship is string && data.customRelationship.size() <= 100)) &&
+        (!('contactHandle' in data) || (data.contactHandle is string && data.contactHandle.size() <= 160)) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 400)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidExpectedItem(data) {
+      return data.keys().hasAll(['ownerId', 'personId', 'title', 'amount', 'settledAmount', 'direction', 'category', 'date', 'dueDate', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'personId', 'title', 'amount', 'settledAmount', 'direction', 'customDirection', 'category', 'customCategory', 'date', 'dueDate', 'linkedTransactionId', 'status', 'notes', 'createdAt', 'updatedAt']) &&
+        data.ownerId == request.auth.uid &&
+        isValidId(data.ownerId) &&
+        isValidId(data.personId) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+        data.amount is number && data.amount > 0 && data.amount <= 1000000000 &&
+        data.settledAmount is number && data.settledAmount >= 0 && data.settledAmount <= data.amount &&
+        data.direction is string && data.direction in ['expecting_from', 'lent_to', 'borrowed_from', 'other'] &&
+        (!('customDirection' in data) || (data.customDirection is string && data.customDirection.size() <= 100)) &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 100 &&
+        (!('customCategory' in data) || (data.customCategory is string && data.customCategory.size() <= 100)) &&
+        data.date is string && data.date.size() >= 1 && data.date.size() <= 32 &&
+        data.dueDate is string && data.dueDate.size() >= 1 && data.dueDate.size() <= 32 &&
+        (!('linkedTransactionId' in data) || isValidId(data.linkedTransactionId)) &&
+        data.status is string && data.status in ['pending', 'partial', 'settled'] &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 400)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidDreamVault(data) {
+      return data.keys().hasAll(['ownerId', 'name', 'storageType', 'targetAmount', 'currentAmount', 'monthlyPlannedContribution', 'targetDate', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['ownerId', 'name', 'storageType', 'customStorageType', 'targetAmount', 'currentAmount', 'monthlyPlannedContribution', 'targetDate', 'linkedAccountId', 'notes', 'createdAt', 'updatedAt']) &&
+        data.ownerId == request.auth.uid &&
+        isValidId(data.ownerId) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.storageType is string && data.storageType in ['Dream Investment', 'Emergency Fund', 'Real Estate Goal', 'Equity & Mutual Funds', 'Gold & Bullion', 'Lending Pool', 'Incoming Reserve', 'Other'] &&
+        (!('customStorageType' in data) || (data.customStorageType is string && data.customStorageType.size() <= 100)) &&
+        data.targetAmount is number && data.targetAmount > 0 && data.targetAmount <= 1000000000 &&
+        data.currentAmount is number && data.currentAmount >= 0 && data.currentAmount <= 1000000000 &&
+        data.monthlyPlannedContribution is number && data.monthlyPlannedContribution >= 0 && data.monthlyPlannedContribution <= 1000000000 &&
+        data.targetDate is string && data.targetDate.size() >= 1 && data.targetDate.size() <= 32 &&
+        (!('linkedAccountId' in data) || isValidId(data.linkedAccountId)) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 400)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    // Cross-Device Automatic Sync Collections (works across Desktop & Mobile on any custom domain)
+    match /globalConfig/{configId} {
+      allow get, list: if isValidId(configId);
+      allow create, update: if isValidId(configId) && isValidGlobalConfig(incoming(), configId);
+      allow delete: if false;
+    }
+
+    match /appUsers/{userId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(userId) && isValidAppUserSync(incoming(), userId);
+      allow delete: if isValidId(userId) && userId != 'user-admin';
+    }
+
+    match /userVaults/{userId} {
+      allow get: if isValidId(userId);
+      allow list: if false;
+      allow create, update: if isValidId(userId) && isValidUserVaultSync(incoming(), userId);
+      allow delete: if isValidId(userId) && userId != 'user-admin';
+    }
+
+    // Admins Registry (Read-only for verified self/admin; managed only by bootstrapped admin)
+    match /admins/{adminId} {
+      allow get: if isVerifiedUser() && isValidId(adminId) && (request.auth.uid == adminId || isAdmin());
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+
+    // Collection 1: User Profiles
+    match /profiles/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isVerifiedUser() &&
+        isValidId(userId) &&
+        userId == request.auth.uid &&
+        isValidUserProfile(incoming()) &&
+        incoming().createdAt == request.time &&
+        (incoming().role == 'user' || isAdmin());
+      allow update: if isVerifiedUser() &&
+        isValidUserProfile(incoming()) &&
+        isValidId(userId) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        (
+          isAdmin() ||
+          (
+            incoming().role == existing().role &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'currency', 'updatedAt'])
+          )
+        );
+      allow delete: if isVerifiedUser() && isValidId(userId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Collection 2: Wallet Accounts
+    match /accounts/{accountId} {
+      allow get: if isSignedIn() && isValidId(accountId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isVerifiedUser() &&
+        isValidId(accountId) &&
+        isValidWalletAccount(incoming()) &&
+        incoming().createdAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidWalletAccount(incoming()) &&
+        isValidId(accountId) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'type', 'customType', 'currency', 'initialBalance', 'color', 'includeInNetWorth', 'updatedAt'])
+        );
+      allow delete: if isVerifiedUser() && isValidId(accountId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Collection 3: Transaction Records
+    match /transactions/{transactionId} {
+      allow get: if isSignedIn() && isValidId(transactionId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isVerifiedUser() &&
+        isValidId(transactionId) &&
+        isValidTransactionRecord(incoming()) &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/accounts/$(incoming().accountId)) &&
+        get(/databases/$(database)/documents/accounts/$(incoming().accountId)).data.ownerId == request.auth.uid;
+      allow update: if isVerifiedUser() &&
+        isValidTransactionRecord(incoming()) &&
+        isValidId(transactionId) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        (
+          isAdmin() ||
+          (
+            existing().status != 'settled' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['title', 'amount', 'category', 'customCategory', 'personId', 'status', 'billable', 'notes', 'proofId', 'proofImageName', 'updatedAt'])
+          )
+        );
+      allow delete: if isVerifiedUser() && isValidId(transactionId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Collection 4: People & Counterparties
+    match /people/{personId} {
+      allow get: if isSignedIn() && isValidId(personId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isVerifiedUser() &&
+        isValidId(personId) &&
+        isValidPersonProfile(incoming()) &&
+        incoming().createdAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidPersonProfile(incoming()) &&
+        isValidId(personId) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'relationship', 'customRelationship', 'contactHandle', 'notes', 'updatedAt'])
+        );
+      allow delete: if isVerifiedUser() && isValidId(personId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Collection 5: Expected Items & Lending Bill Entries
+    match /expectedItems/{itemId} {
+      allow get: if isSignedIn() && isValidId(itemId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isVerifiedUser() &&
+        isValidId(itemId) &&
+        isValidExpectedItem(incoming()) &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/people/$(incoming().personId)) &&
+        get(/databases/$(database)/documents/people/$(incoming().personId)).data.ownerId == request.auth.uid;
+      allow update: if isVerifiedUser() &&
+        isValidExpectedItem(incoming()) &&
+        isValidId(itemId) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        (
+          isAdmin() ||
+          (
+            existing().status != 'settled' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['settledAmount', 'status', 'dueDate', 'notes', 'updatedAt'])
+          )
+        );
+      allow delete: if isVerifiedUser() && isValidId(itemId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Collection 6: Dream Vaults & Money Storage
+    match /dreamVaults/{vaultId} {
+      allow get: if isSignedIn() && isValidId(vaultId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isVerifiedUser() &&
+        isValidId(vaultId) &&
+        isValidDreamVault(incoming()) &&
+        incoming().createdAt == request.time;
+      allow update: if isVerifiedUser() &&
+        isValidDreamVault(incoming()) &&
+        isValidId(vaultId) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'storageType', 'customStorageType', 'targetAmount', 'currentAmount', 'monthlyPlannedContribution', 'targetDate', 'notes', 'updatedAt'])
+        );
+      allow delete: if isVerifiedUser() && isValidId(vaultId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+  }
+}

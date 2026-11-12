@@ -1,0 +1,1309 @@
+<!DOCTYPE html>
+<html lang="en" class="dark scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Expense Tracker — Penny Penny Makes Many</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'sans-serif'],
+                        display: ['Space Grotesk', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Theme Variables for Seamless Black/Dark & White/Light Background Switching */
+        :root {
+            --bg-main: #ffffff;
+            --bg-secondary: #f8fafc;
+            --bg-card: rgba(255, 255, 255, 0.92);
+            --bg-inner: #f1f5f9;
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --border-color: rgba(15, 23, 42, 0.12);
+            --poster-studio-bg: radial-gradient(circle at 50% 35%, #eff6ff 0%, #dbeafe 55%, #e0e7ff 100%);
+            --card-shadow: 0 20px 45px -15px rgba(15, 23, 42, 0.10);
+        }
+
+        html.dark {
+            --bg-main: #03050a;
+            --bg-secondary: #080d1a;
+            --bg-card: rgba(15, 23, 42, 0.78);
+            --bg-inner: #0b1326;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-color: rgba(255, 255, 255, 0.11);
+            --poster-studio-bg: radial-gradient(circle at 50% 35%, #172554 0%, #090d16 65%, #000000 100%);
+            --card-shadow: 0 25px 55px -12px rgba(0, 0, 0, 0.75);
+        }
+
+        body {
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            transition: background-color 0.4s ease, color 0.4s ease;
+            overflow-x: hidden;
+        }
+
+        /* Ambient Glows */
+        .ambient-bg {
+            background-image: 
+                radial-gradient(circle at 10% 15%, rgba(16, 185, 129, 0.13) 0%, transparent 35%),
+                radial-gradient(circle at 90% 12%, rgba(245, 158, 11, 0.13) 0%, transparent 35%),
+                radial-gradient(circle at 50% 75%, rgba(59, 130, 246, 0.10) 0%, transparent 45%);
+        }
+
+        /* Adaptive Theme Surface Classes */
+        .theme-card {
+            background: var(--bg-card);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border-color);
+            box-shadow: var(--card-shadow);
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .theme-inner {
+            background-color: var(--bg-inner);
+            border: 1px solid var(--border-color);
+            transition: all 0.35s ease;
+        }
+
+        .theme-text-muted {
+            color: var(--text-muted);
+        }
+
+        .poster-studio-surface {
+            background: var(--poster-studio-bg);
+            transition: background 0.4s ease;
+        }
+
+        /* Rich Graphic Hover Animations (Non-clickable Info Cards) */
+        .info-hover-card {
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            cursor: default;
+        }
+
+        .info-hover-card:hover {
+            transform: translateY(-8px) scale(1.015);
+            border-color: rgba(16, 185, 129, 0.55);
+            box-shadow: 0 28px 60px -12px rgba(16, 185, 129, 0.25), 0 0 30px rgba(245, 158, 11, 0.15);
+        }
+
+        .info-pill-hover {
+            transition: all 0.3s ease;
+            cursor: default;
+        }
+
+        .info-pill-hover:hover {
+            transform: translateY(-3px) scale(1.04);
+            box-shadow: 0 10px 25px -5px rgba(99, 102, 241, 0.35);
+        }
+
+        /* Animated Gradient Headlines */
+        .text-gradient-gold {
+            background: linear-gradient(135deg, #f59e0b 0%, #eab308 35%, #10b981 75%, #3b82f6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-size: 200% auto;
+            animation: shineText 5s linear infinite;
+        }
+
+        .text-gradient-emerald {
+            background: linear-gradient(135deg, #10b981 0%, #059669 45%, #2563eb 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        html.dark .text-gradient-emerald {
+            background: linear-gradient(135deg, #34d399 0%, #10b981 50%, #60a5fa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        @keyframes shineText {
+            to { background-position: 200% center; }
+        }
+
+        /* Floating Animations for Badges & Pointing Hands */
+        @keyframes floatSlow {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-9px); }
+        }
+
+        @keyframes floatReverse {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(8px); }
+        }
+
+        @keyframes pointBounce {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(7px); }
+        }
+
+        @keyframes ribbonFlow {
+            0% { background-position: 0% 50%; }
+            100% { background-position: 200% 50%; }
+        }
+
+        .animate-float-slow {
+            animation: floatSlow 4.2s ease-in-out infinite;
+        }
+
+        .animate-float-reverse {
+            animation: floatReverse 4.8s ease-in-out infinite;
+        }
+
+        .animate-point-down {
+            animation: pointBounce 1.6s ease-in-out infinite;
+        }
+
+        .promo-ribbon {
+            background: linear-gradient(90deg, #065f46, #1e3a8a, #78350f, #065f46);
+            background-size: 200% 200%;
+            animation: ribbonFlow 10s linear infinite;
+        }
+
+        /* Clickable Button Shimmer Effect */
+        .btn-clickable {
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .btn-clickable::after {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -60%;
+            width: 45%;
+            height: 200%;
+            background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0) 100%);
+            transform: rotate(25deg);
+            transition: all 0.65s ease;
+        }
+
+        .btn-clickable:hover::after {
+            left: 130%;
+        }
+
+        /* Family Advertising Poster 3D Hover */
+        .family-poster-card {
+            transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.45s ease;
+        }
+
+        .family-poster-card:hover {
+            transform: perspective(1000px) rotateY(-2.5deg) rotateX(2deg) scale(1.01);
+            box-shadow: 0 30px 70px -15px rgba(37, 99, 235, 0.35), 0 0 40px rgba(245, 158, 11, 0.25);
+        }
+    </style>
+</head>
+<body class="ambient-bg antialiased selection:bg-emerald-500 selection:text-white">
+
+    <!-- =================================================================== -->
+    <!-- 1. TOP PROMOTIONAL MARQUEE BANNER (INFORMATIONAL)                   -->
+    <!-- =================================================================== -->
+    <div class="promo-ribbon text-white text-xs sm:text-sm py-2.5 px-4 border-b border-white/15 relative z-40">
+        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-center sm:text-left">
+            <div class="flex items-center gap-2 mx-auto sm:mx-0 font-bold tracking-wide">
+                <span class="inline-block animate-bounce">🪙</span>
+                <span>SAVE MONEY • TRACK MONEY • <span class="text-amber-300 underline decoration-amber-400">PENNY PENNY MAKES MANY!</span></span>
+            </div>
+            <div class="hidden md:flex items-center gap-3 text-xs font-semibold text-emerald-200">
+                <span><i class="fa-solid fa-star text-amber-300 mr-1"></i> Dream Money</span>
+                <span>•</span>
+                <span><i class="fa-solid fa-camera text-amber-300 mr-1"></i> Records with Image</span>
+                <span>•</span>
+                <span><i class="fa-solid fa-file-invoice text-amber-300 mr-1"></i> Pending Money Bill Info Titles</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- 2. STICKY HEADER WITH DARK / WHITE BG TOGGLE & REGISTER BUTTON      -->
+    <!-- =================================================================== -->
+    <header class="sticky top-0 z-40 theme-card border-t-0 border-x-0 rounded-none">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-3">
+            
+            <!-- Brand Title (Non-operational Identity) -->
+            <div class="flex items-center gap-3 select-none">
+                <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 via-blue-600 to-amber-500 p-0.5 shadow-lg shadow-emerald-500/20">
+                    <div class="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center">
+                        <span class="font-display font-extrabold text-2xl text-amber-400">₹</span>
+                    </div>
+                </div>
+                <div>
+                    <span class="font-display font-extrabold text-lg sm:text-2xl tracking-tight block leading-none">
+                        Your Expense <span class="text-emerald-500">Tracker</span>
+                    </span>
+                    <span class="text-[11px] sm:text-xs font-bold text-amber-500 tracking-wider uppercase block mt-1">
+                        “Penny penny makes many”
+                    </span>
+                </div>
+            </div>
+
+            <!-- Right Controls: ONLY Dark/White BG Option & Register Button Clickable -->
+            <div class="flex items-center gap-2.5 sm:gap-4">
+                
+                <!-- CLICKABLE DARK / WHITE BACKGROUND SWITCHER -->
+                <div class="theme-inner p-1 rounded-2xl flex items-center gap-1 shadow-inner">
+                    <button 
+                        id="btnDarkBg" 
+                        onclick="setPageTheme('dark')" 
+                        class="btn-clickable px-3 sm:px-4 py-2 rounded-xl font-display font-bold text-xs sm:text-sm flex items-center gap-1.5 transition bg-slate-900 text-amber-300 shadow-md border border-amber-400/40"
+                    >
+                        <i class="fa-solid fa-moon"></i>
+                        <span>Black / Dark BG</span>
+                    </button>
+                    <button 
+                        id="btnLightBg" 
+                        onclick="setPageTheme('light')" 
+                        class="btn-clickable px-3 sm:px-4 py-2 rounded-xl font-display font-bold text-xs sm:text-sm flex items-center gap-1.5 transition text-slate-500 hover:text-slate-900"
+                    >
+                        <i class="fa-solid fa-sun text-amber-500"></i>
+                        <span>White / Light BG</span>
+                    </button>
+                </div>
+
+                <!-- CLICKABLE REGISTER BUTTON -->
+                <button 
+                    onclick="openInfoPopup('register')" 
+                    class="btn-clickable bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-500 text-slate-950 font-display font-extrabold text-xs sm:text-sm px-4 sm:px-6 py-3 rounded-2xl shadow-lg shadow-amber-500/25 hover:scale-105 active:scale-95 transition flex items-center gap-2"
+                >
+                    <i class="fa-solid fa-user-plus"></i>
+                    <span>Register</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- =================================================================== -->
+    <!-- 3. HERO FRONT PAGE WITH BANNERS & INDIAN FAMILY ADVERTISING IMAGE   -->
+    <!-- =================================================================== -->
+    <section class="relative z-10 pt-8 pb-16 lg:py-16 overflow-hidden">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-8 items-center">
+                
+                <!-- Left Column: Hero Advertising Copy & Clickable CTA Buttons -->
+                <div class="lg:col-span-6 space-y-6 text-center lg:text-left">
+                    
+                    <!-- Save Money • Track Money Banner Badges -->
+                    <div class="inline-flex flex-wrap items-center justify-center lg:justify-start gap-2">
+                        <span class="px-3.5 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-500 dark:text-emerald-300 font-display font-extrabold text-xs uppercase tracking-wider flex items-center gap-1.5">
+                            <i class="fa-solid fa-piggy-bank"></i> Save Money
+                        </span>
+                        <span class="px-3.5 py-1.5 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-600 dark:text-amber-300 font-display font-extrabold text-xs uppercase tracking-wider flex items-center gap-1.5">
+                            <i class="fa-solid fa-chart-pie"></i> Track Money
+                        </span>
+                        <span class="px-3.5 py-1.5 rounded-full bg-blue-500/15 border border-blue-500/40 text-blue-600 dark:text-blue-300 font-display font-bold text-xs uppercase tracking-wider">
+                            🇮🇳 Family Smart Guide
+                        </span>
+                    </div>
+
+                    <!-- Main Title & Slogan -->
+                    <div class="space-y-3">
+                        <h1 class="font-display font-extrabold text-4xl sm:text-6xl tracking-tight leading-[1.08]">
+                            Your Expense <span class="text-gradient-emerald">Tracker</span>
+                        </h1>
+                        <div class="inline-block">
+                            <p class="font-display font-extrabold text-2xl sm:text-4xl text-gradient-gold tracking-tight">
+                                “Penny penny makes many.”
+                            </p>
+                            <div class="h-1.5 w-full bg-gradient-to-r from-amber-500 via-emerald-500 to-blue-600 rounded-full mt-1.5"></div>
+                        </div>
+                    </div>
+
+                    <!-- Pure Informational Description -->
+                    <p class="theme-text-muted text-base sm:text-lg max-w-xl mx-auto lg:mx-0 leading-relaxed font-medium">
+                        Little savings every single day build your family's biggest milestones! Discover a complete all-in-one expense companion designed for <strong class="text-emerald-500">Dream Money goals</strong>, <strong class="text-amber-500">Expense Records with Image proof</strong>, and <strong class="text-blue-500">Pending Money Bills with ready-made Info Titles</strong>.
+                    </p>
+
+                    <!-- Non-clickable Hover Info Highlights -->
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                        <div class="theme-inner info-pill-hover rounded-2xl p-3.5 flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-500 flex items-center justify-center text-lg shrink-0">
+                                <i class="fa-solid fa-vault"></i>
+                            </div>
+                            <div class="text-left">
+                                <p class="font-display font-bold text-xs sm:text-sm">Dream Money</p>
+                                <p class="text-[11px] theme-text-muted">Milestone Vaults</p>
+                            </div>
+                        </div>
+
+                        <div class="theme-inner info-pill-hover rounded-2xl p-3.5 flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-500 flex items-center justify-center text-lg shrink-0">
+                                <i class="fa-solid fa-camera-retro"></i>
+                            </div>
+                            <div class="text-left">
+                                <p class="font-display font-bold text-xs sm:text-sm">Photo Records</p>
+                                <p class="text-[11px] theme-text-muted">Bills with Image</p>
+                            </div>
+                        </div>
+
+                        <div class="theme-inner info-pill-hover rounded-2xl p-3.5 flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-500 flex items-center justify-center text-lg shrink-0">
+                                <i class="fa-solid fa-file-invoice-dollar"></i>
+                            </div>
+                            <div class="text-left">
+                                <p class="font-display font-bold text-xs sm:text-sm">Pending Bills</p>
+                                <p class="text-[11px] theme-text-muted">Smart Info Titles</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ONLY CLICKABLE MAIN CTA BUTTONS -->
+                    <div class="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4 pt-3">
+                        <button 
+                            onclick="openInfoPopup('start')" 
+                            class="btn-clickable w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-emerald-400 to-teal-400 text-slate-950 font-display font-extrabold text-base sm:text-lg shadow-xl shadow-emerald-500/30 hover:scale-105 active:scale-95 transition flex items-center justify-center gap-3 group"
+                        >
+                            <span>Click Here to Start</span>
+                            <span class="w-8 h-8 rounded-xl bg-slate-950/15 flex items-center justify-center group-hover:translate-x-1 transition-transform">
+                                <i class="fa-solid fa-arrow-right"></i>
+                            </span>
+                        </button>
+
+                        <button 
+                            onclick="openInfoPopup('register')" 
+                            class="btn-clickable w-full sm:w-auto px-7 py-4 rounded-2xl theme-card border-2 border-amber-500/50 hover:border-amber-500 font-display font-extrabold text-base sm:text-lg hover:scale-105 active:scale-95 transition flex items-center justify-center gap-2.5"
+                        >
+                            <i class="fa-solid fa-user-check text-amber-500"></i>
+                            <span>Register Now</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right Column: Advertising Poster — SAME LADY IN ROYAL BLUE SAREE + HUSBAND + 1 CHILD -->
+                <div class="lg:col-span-6 relative">
+                    <!-- Ambient Glow Behind Poster -->
+                    <div class="absolute -inset-4 bg-gradient-to-tr from-blue-600/25 via-amber-500/20 to-emerald-500/25 rounded-3xl blur-2xl -z-10"></div>
+
+                    <div class="family-poster-card theme-card rounded-3xl p-3 sm:p-4 border-2 border-amber-500/40 relative">
+                        
+                        <!-- Top Advertising Ribbon -->
+                        <div class="absolute -top-4 left-1/2 -translate-x-1/2 z-30 bg-gradient-to-r from-amber-500 via-yellow-400 to-emerald-400 text-slate-950 font-display font-extrabold text-[11px] sm:text-xs uppercase tracking-widest px-5 py-1.5 rounded-full shadow-xl flex items-center gap-2 whitespace-nowrap">
+                            <i class="fa-solid fa-award"></i>
+                            <span>HAPPY INDIAN FAMILY • SAVE MONEY • TRACK MONEY</span>
+                        </div>
+
+                        <!-- Studio Portrait Container (Adapts to Black/Dark or White/Light BG) -->
+                        <div class="poster-studio-surface relative rounded-2xl overflow-hidden border border-white/15 pt-6 px-2 pb-2">
+                            
+                            <!-- Custom High-Detail Studio Vector Portrait:
+                                 1) Center: Exact Lady in Royal Blue Saree with Gold Zari Border, Gold-Pearl Choker Necklace & Jhumkas, Open-Mouth Excited Smile, Pointing Downward with Both Index Fingers
+                                 2) Left: Smiling Indian Husband in Festive Kurta & Jacket
+                                 3) Right: Happy Child Holding Golden Piggy Bank -->
+                            <svg viewBox="0 0 680 540" class="w-full h-auto max-h-[470px] mx-auto drop-shadow-2xl select-none" xmlns="http://www.w3.org/2000/svg">
+                                <defs>
+                                    <!-- Royal Blue Silk Saree Gradient (Matching Reference Image) -->
+                                    <linearGradient id="royalBlueSaree" x1="0%" y1="0%" x2="100%" y2="100%">
+                                        <stop offset="0%" stop-color="#1d4ed8"/>
+                                        <stop offset="45%" stop-color="#1e40af"/>
+                                        <stop offset="100%" stop-color="#172554"/>
+                                    </linearGradient>
+                                    <linearGradient id="royalBlueHighlight" x1="0%" y1="0%" x2="100%" y2="0%">
+                                        <stop offset="0%" stop-color="#2563eb"/>
+                                        <stop offset="50%" stop-color="#3b82f6"/>
+                                        <stop offset="100%" stop-color="#1e3a8a"/>
+                                    </linearGradient>
+                                    <!-- Golden Zari Border Gradient -->
+                                    <linearGradient id="goldZari" x1="0%" y1="0%" x2="100%" y2="100%">
+                                        <stop offset="0%" stop-color="#fef08a"/>
+                                        <stop offset="50%" stop-color="#f59e0b"/>
+                                        <stop offset="100%" stop-color="#b45309"/>
+                                    </linearGradient>
+                                    <!-- Warm Indian Skin Tones -->
+                                    <linearGradient id="skinLady" x1="0%" y1="0%" x2="0%" y2="100%">
+                                        <stop offset="0%" stop-color="#f6cbb6"/>
+                                        <stop offset="100%" stop-color="#e5a98c"/>
+                                    </linearGradient>
+                                    <linearGradient id="skinHusband" x1="0%" y1="0%" x2="0%" y2="100%">
+                                        <stop offset="0%" stop-color="#eab69f"/>
+                                        <stop offset="100%" stop-color="#d49478"/>
+                                    </linearGradient>
+                                    <!-- Husband Festive Jacket -->
+                                    <linearGradient id="husbandJacket" x1="0%" y1="0%" x2="100%" y2="100%">
+                                        <stop offset="0%" stop-color="#0f766e"/>
+                                        <stop offset="100%" stop-color="#115e59"/>
+                                    </linearGradient>
+                                    <!-- Child Festive Outfit -->
+                                    <linearGradient id="childOutfit" x1="0%" y1="0%" x2="100%" y2="100%">
+                                        <stop offset="0%" stop-color="#f59e0b"/>
+                                        <stop offset="100%" stop-color="#d97706"/>
+                                    </linearGradient>
+                                </defs>
+
+                                <!-- Subtle Studio Halo Glow Behind Family -->
+                                <circle cx="340" cy="240" r="210" fill="url(#goldZari)" opacity="0.10"/>
+                                <circle cx="340" cy="240" r="145" fill="#3b82f6" opacity="0.12"/>
+
+                                <!-- Floating Decorative Rupee Coins in Background -->
+                                <g class="animate-float-slow">
+                                    <circle cx="82" cy="95" r="24" fill="url(#goldZari)"/>
+                                    <circle cx="82" cy="95" r="19" fill="none" stroke="#78350f" stroke-width="1.5" stroke-dasharray="3,3"/>
+                                    <text x="82" y="103" text-anchor="middle" font-size="22" font-weight="800" fill="#451a03">₹</text>
+                                </g>
+                                <g class="animate-float-reverse">
+                                    <circle cx="595" cy="90" r="22" fill="url(#goldZari)"/>
+                                    <circle cx="595" cy="90" r="17" fill="none" stroke="#78350f" stroke-width="1.5" stroke-dasharray="3,3"/>
+                                    <text x="595" y="98" text-anchor="middle" font-size="20" font-weight="800" fill="#451a03">₹</text>
+                                </g>
+
+                                <!-- ========================================================= -->
+                                <!-- 1. HUSBAND (LEFT SIDE - SMILING & SUPPORTING)             -->
+                                <!-- ========================================================= -->
+                                <g id="indianHusband" transform="translate(15, 18)">
+                                    <!-- Shoulders & Teal/Emerald Nehru Jacket over Cream Kurta -->
+                                    <path d="M55 475 C58 345 95 305 165 305 C235 305 268 345 272 475 Z" fill="#fef3c7"/>
+                                    <path d="M68 475 C72 350 102 310 165 310 C228 310 258 350 262 475 Z" fill="url(#husbandJacket)"/>
+                                    <!-- Kurta V-Neck Collar & Golden Buttons -->
+                                    <path d="M142 310 L165 365 L188 310 Z" fill="#fef3c7"/>
+                                    <path d="M136 310 L165 372 L194 310" fill="none" stroke="url(#goldZari)" stroke-width="4"/>
+                                    <circle cx="165" cy="390" r="4" fill="url(#goldZari)"/>
+                                    <circle cx="165" cy="412" r="4" fill="url(#goldZari)"/>
+                                    <circle cx="165" cy="434" r="4" fill="url(#goldZari)"/>
+                                    <!-- Pocket Square -->
+                                    <path d="M105 365 L125 355 L128 372 L105 372 Z" fill="url(#goldZari)"/>
+
+                                    <!-- Neck -->
+                                    <rect x="143" y="258" width="44" height="58" rx="18" fill="url(#skinHusband)"/>
+                                    <!-- Ears -->
+                                    <ellipse cx="105" cy="205" rx="10" ry="18" fill="url(#skinHusband)"/>
+                                    <ellipse cx="225" cy="205" rx="10" ry="18" fill="url(#skinHusband)"/>
+                                    <!-- Head/Face -->
+                                    <path d="M110 175 C110 120 220 120 220 175 C220 242 198 274 165 274 C132 274 110 242 110 175 Z" fill="url(#skinHusband)"/>
+                                    <!-- Styled Dark Hair -->
+                                    <path d="M106 185 C102 130 135 102 172 105 C212 108 230 138 223 185 C218 158 205 142 165 140 C128 138 114 158 106 185 Z" fill="#171717"/>
+                                    <!-- Eyebrows -->
+                                    <path d="M126 178 Q142 170 155 176" fill="none" stroke="#171717" stroke-width="4.5" stroke-linecap="round"/>
+                                    <path d="M175 176 Q188 170 204 178" fill="none" stroke="#171717" stroke-width="4.5" stroke-linecap="round"/>
+                                    <!-- Warm Eyes -->
+                                    <ellipse cx="141" cy="193" rx="9" ry="6" fill="#ffffff"/>
+                                    <circle cx="141" cy="193" r="4.5" fill="#291811"/>
+                                    <circle cx="139" cy="191" r="1.5" fill="#ffffff"/>
+                                    <ellipse cx="189" cy="193" rx="9" ry="6" fill="#ffffff"/>
+                                    <circle cx="189" cy="193" r="4.5" fill="#291811"/>
+                                    <circle cx="187" cy="191" r="1.5" fill="#ffffff"/>
+                                    <!-- Nose -->
+                                    <path d="M165 195 L161 218 Q165 223 171 218" fill="none" stroke="#b9775c" stroke-width="3" stroke-linecap="round"/>
+                                    <!-- Groomed Mustache & Light Beard Shadow -->
+                                    <path d="M140 232 Q165 223 190 232" fill="none" stroke="#262626" stroke-width="4" stroke-linecap="round"/>
+                                    <!-- Big Open Happy Smile -->
+                                    <path d="M143 235 Q165 260 187 235 Z" fill="#7f1d1d"/>
+                                    <path d="M146 236 Q165 244 184 236 Z" fill="#ffffff"/>
+
+                                    <!-- Husband's Right Hand Pointing Downward / Thumbs Up Gesture -->
+                                    <g class="animate-point-down">
+                                        <circle cx="92" cy="395" r="24" fill="url(#skinHusband)"/>
+                                        <!-- Thumb Out -->
+                                        <path d="M105 385 Q126 376 128 388 Q126 398 106 398 Z" fill="url(#skinHusband)"/>
+                                        <!-- Index Finger Pointing Down -->
+                                        <rect x="84" y="405" width="14" height="44" rx="7" fill="url(#skinHusband)"/>
+                                    </g>
+                                </g>
+
+                                <!-- ========================================================= -->
+                                <!-- 2. CHILD (RIGHT SIDE - HAPPY WITH GOLDEN PIGGY BANK)      -->
+                                <!-- ========================================================= -->
+                                <g id="indianChild" transform="translate(435, 95)">
+                                    <!-- Child Festive Kurta (Warm Marigold Gold) -->
+                                    <path d="M25 400 C30 300 58 270 112 270 C166 270 192 300 198 400 Z" fill="url(#childOutfit)"/>
+                                    <!-- Golden Collar Trim -->
+                                    <path d="M88 270 L112 315 L136 270" fill="none" stroke="#fef08a" stroke-width="4"/>
+
+                                    <!-- Neck -->
+                                    <rect x="95" y="235" width="34" height="42" rx="14" fill="url(#skinLady)"/>
+                                    <!-- Ears -->
+                                    <ellipse cx="64" cy="195" rx="8" ry="14" fill="url(#skinLady)"/>
+                                    <ellipse cx="160" cy="195" rx="8" ry="14" fill="url(#skinLady)"/>
+                                    <!-- Child Head -->
+                                    <circle cx="112" cy="188" r="48" fill="url(#skinLady)"/>
+                                    <!-- Cute Hair -->
+                                    <path d="M62 185 C60 132 90 120 118 122 C148 124 166 145 162 185 C154 160 135 150 110 150 C85 150 70 162 62 185 Z" fill="#171717"/>
+                                    <!-- Eyebrows -->
+                                    <path d="M84 172 Q95 166 104 172" fill="none" stroke="#171717" stroke-width="3.5" stroke-linecap="round"/>
+                                    <path d="M120 172 Q129 166 140 172" fill="none" stroke="#171717" stroke-width="3.5" stroke-linecap="round"/>
+                                    <!-- Sparkling Eyes -->
+                                    <circle cx="94" cy="186" r="5.5" fill="#1f120d"/>
+                                    <circle cx="92" cy="184" r="2" fill="#ffffff"/>
+                                    <circle cx="130" cy="186" r="5.5" fill="#1f120d"/>
+                                    <circle cx="128" cy="184" r="2" fill="#ffffff"/>
+                                    <!-- Rosy Cheeks -->
+                                    <ellipse cx="80" cy="200" rx="8" ry="4.5" fill="#f43f5e" opacity="0.28"/>
+                                    <ellipse cx="144" cy="200" rx="8" ry="4.5" fill="#f43f5e" opacity="0.28"/>
+                                    <!-- Cute Nose -->
+                                    <path d="M112 188 Q109 201 115 203" fill="none" stroke="#c87d60" stroke-width="2.5" stroke-linecap="round"/>
+                                    <!-- Excited Open Smile -->
+                                    <path d="M95 210 Q112 232 129 210 Z" fill="#881337"/>
+                                    <path d="M98 211 Q112 217 126 211 Z" fill="#ffffff"/>
+
+                                    <!-- Child Holding Golden Piggy Bank ("Dream Money") -->
+                                    <g class="animate-float-slow" transform="translate(55, 295)">
+                                        <ellipse cx="62" cy="48" rx="44" ry="34" fill="url(#goldZari)" stroke="#78350f" stroke-width="2"/>
+                                        <!-- Piggy Ear & Snout -->
+                                        <path d="M35 20 L48 8 L56 22 Z" fill="#f59e0b" stroke="#78350f" stroke-width="1.5"/>
+                                        <ellipse cx="104" cy="48" rx="8" ry="12" fill="#fbbf24" stroke="#78350f" stroke-width="1.5"/>
+                                        <circle cx="86" cy="38" r="3.5" fill="#451a03"/>
+                                        <!-- Coin Slot & Rupee Emblem -->
+                                        <rect x="50" y="16" width="22" height="4" rx="2" fill="#451a03"/>
+                                        <text x="60" y="58" text-anchor="middle" font-size="24" font-weight="900" fill="#451a03">₹</text>
+                                    </g>
+                                </g>
+
+                                <!-- ========================================================= -->
+                                <!-- 3. CENTER HERO LADY (EXACT MATCH TO UPLOADED PHOTO:       -->
+                                <!--    ROYAL BLUE SAREE, GOLD ZARI BORDER, PEARL-GOLD CHOKER, -->
+                                <!--    OPEN HAPPY SMILE, POINTING DOWN WITH BOTH HANDS)       -->
+                                <!-- ========================================================= -->
+                                <g id="centerSareeLady" transform="translate(155, 10)">
+                                    
+                                    <!-- Long Dark Flowing Hair Behind Shoulders -->
+                                    <path d="M102 125 C85 190 78 255 82 305 C120 315 250 315 288 305 C292 255 285 190 268 125 Z" fill="#1c1613"/>
+
+                                    <!-- Royal Blue Blouse & Shoulders (Sweetheart/Square Neckline like Reference Photo) -->
+                                    <path d="M48 495 C52 340 82 288 185 288 C288 288 318 340 322 495 Z" fill="url(#royalBlueSaree)"/>
+                                    
+                                    <!-- Neck & Décolletage (Sweetheart Neckline with Gold Piping) -->
+                                    <path d="M122 286 L128 348 Q185 375 242 348 L248 286 Z" fill="url(#skinLady)"/>
+                                    <path d="M122 288 L128 348 Q185 375 242 348 L248 288" fill="none" stroke="url(#goldZari)" stroke-width="3.5"/>
+
+                                    <!-- Neck Column -->
+                                    <rect x="155" y="225" width="60" height="75" rx="24" fill="url(#skinLady)"/>
+
+                                    <!-- Traditional Multi-Strand Pearl & Gold Choker Necklace with Center Pendant (Exact Match) -->
+                                    <g id="pearlGoldChoker">
+                                        <!-- Upper & Lower Pearl-Gold Strands -->
+                                        <path d="M142 276 Q185 304 228 276" fill="none" stroke="#fef08a" stroke-width="11" stroke-linecap="round" stroke-dasharray="2,5"/>
+                                        <path d="M139 283 Q185 313 231 283" fill="none" stroke="url(#goldZari)" stroke-width="8" stroke-linecap="round"/>
+                                        <path d="M143 290 Q185 320 227 290" fill="none" stroke="#fef9c3" stroke-width="6" stroke-linecap="round" stroke-dasharray="1,4"/>
+                                        <!-- Ornate Center Gold Temple Pendant with Green/Gold Drops -->
+                                        <path d="M174 292 L196 292 L200 318 L185 328 L170 318 Z" fill="url(#goldZari)" stroke="#92400e" stroke-width="1.5"/>
+                                        <circle cx="185" cy="306" r="5" fill="#d97706"/>
+                                        <!-- Emerald Green & Gold Hanging Beads -->
+                                        <circle cx="177" cy="324" r="3" fill="#059669"/>
+                                        <circle cx="193" cy="324" r="3" fill="#059669"/>
+                                        <circle cx="185" cy="334" r="4.5" fill="url(#goldZari)"/>
+                                    </g>
+
+                                    <!-- Royal Blue Silk Saree Pallu Drape Across Chest with Broad Golden Zari Border -->
+                                    <path d="M68 495 L112 375 L292 292 L332 345 L295 495 Z" fill="url(#royalBlueHighlight)"/>
+                                    <!-- Diagonal Golden Zari Border (Upper Edge of Pallu) -->
+                                    <path d="M98 402 L292 292 L302 310 L106 422 Z" fill="url(#goldZari)" opacity="0.92"/>
+                                    <line x1="102" y1="412" x2="297" y2="301" stroke="#78350f" stroke-width="1.5" stroke-dasharray="4,4"/>
+                                    <!-- Saree Pleats & Subtle Golden Zari Checks/Motifs -->
+                                    <line x1="135" y1="430" x2="275" y2="355" stroke="#1e3a8a" stroke-width="3"/>
+                                    <line x1="150" y1="465" x2="290" y2="390" stroke="#1e3a8a" stroke-width="3"/>
+                                    <!-- Small Diamond Zari Buttis (Motifs) -->
+                                    <polygon points="195,380 201,386 195,392 189,386" fill="url(#goldZari)"/>
+                                    <polygon points="245,355 251,361 245,367 239,361" fill="url(#goldZari)"/>
+                                    <polygon points="165,435 171,441 165,447 159,441" fill="url(#goldZari)"/>
+                                    <polygon points="225,425 231,431 225,437 219,431" fill="url(#goldZari)"/>
+
+                                    <!-- Ears & Traditional Gold Jhumka Earrings -->
+                                    <ellipse cx="118" cy="175" rx="10" ry="19" fill="url(#skinLady)"/>
+                                    <ellipse cx="252" cy="175" rx="10" ry="19" fill="url(#skinLady)"/>
+                                    <!-- Left Jhumka -->
+                                    <circle cx="117" cy="186" r="4.5" fill="url(#goldZari)"/>
+                                    <path d="M110 198 C110 190 124 190 124 198 Z" fill="url(#goldZari)"/>
+                                    <circle cx="117" cy="202" r="2.5" fill="#fef08a"/>
+                                    <!-- Right Jhumka -->
+                                    <circle cx="253" cy="186" r="4.5" fill="url(#goldZari)"/>
+                                    <path d="M246 198 C246 190 260 190 260 198 Z" fill="url(#goldZari)"/>
+                                    <circle cx="253" cy="202" r="2.5" fill="#fef08a"/>
+
+                                    <!-- Lady's Face Contour -->
+                                    <path d="M120 142 C120 75 250 75 250 142 C250 215 222 252 185 252 C148 252 120 215 120 142 Z" fill="url(#skinLady)"/>
+
+                                    <!-- Soft Cheek Glow -->
+                                    <ellipse cx="144" cy="182" rx="14" ry="8" fill="#e11d48" opacity="0.18"/>
+                                    <ellipse cx="226" cy="182" rx="14" ry="8" fill="#e11d48" opacity="0.18"/>
+
+                                    <!-- Expressive Arched Eyebrows -->
+                                    <path d="M136 138 Q154 127 171 136" fill="none" stroke="#271912" stroke-width="4.2" stroke-linecap="round"/>
+                                    <path d="M199 136 Q216 127 234 138" fill="none" stroke="#271912" stroke-width="4.2" stroke-linecap="round"/>
+
+                                    <!-- Tiny Traditional Bindi -->
+                                    <circle cx="185" cy="133" r="2.5" fill="#1e3a8a"/>
+
+                                    <!-- Bright Expressive Eyes Looking Forward -->
+                                    <g>
+                                        <ellipse cx="154" cy="154" rx="11" ry="7.5" fill="#ffffff"/>
+                                        <circle cx="154" cy="154" r="5.5" fill="#2b170e"/>
+                                        <circle cx="152" cy="152" r="2" fill="#ffffff"/>
+                                        <path d="M141 151 Q154 143 167 152" fill="none" stroke="#1c100b" stroke-width="2.5" stroke-linecap="round"/>
+
+                                        <ellipse cx="216" cy="154" rx="11" ry="7.5" fill="#ffffff"/>
+                                        <circle cx="216" cy="154" r="5.5" fill="#2b170e"/>
+                                        <circle cx="214" cy="152" r="2" fill="#ffffff"/>
+                                        <path d="M203 152 Q216 143 229 151" fill="none" stroke="#1c100b" stroke-width="2.5" stroke-linecap="round"/>
+                                    </g>
+
+                                    <!-- Sculpted Nose -->
+                                    <path d="M185 154 L181 180 Q185 186 193 180" fill="none" stroke="#c57f64" stroke-width="3" stroke-linecap="round"/>
+
+                                    <!-- WIDE EXCITED OPEN-MOUTH SMILE (Matching Uploaded Image 1) -->
+                                    <g>
+                                        <!-- Outer Coral-Rose Lips -->
+                                        <path d="M156 195 Q185 189 214 195 Q208 234 185 234 Q162 234 156 195 Z" fill="#c25953"/>
+                                        <!-- Inner Mouth Cavity -->
+                                        <path d="M161 198 Q185 194 209 198 Q203 226 185 226 Q167 226 161 198 Z" fill="#68181f"/>
+                                        <!-- Upper White Teeth Row -->
+                                        <path d="M163 198 Q185 195 207 198 L204 207 Q185 205 166 207 Z" fill="#ffffff"/>
+                                        <!-- Happy Tongue -->
+                                        <path d="M172 217 Q185 210 198 217 Q193 226 185 226 Q177 226 172 217 Z" fill="#e06d73"/>
+                                    </g>
+
+                                    <!-- Center-Parted Crown Hair Framing Face -->
+                                    <path d="M114 162 C108 92 145 58 185 62 C225 58 262 92 256 162 C248 118 225 94 185 88 C145 94 122 118 114 162 Z" fill="#1c1613"/>
+
+                                    <!-- ===================================================== -->
+                                    <!-- BOTH HANDS POINTING DOWNWARD (EXACT POSE FROM PHOTO)  -->
+                                    <!-- ===================================================== -->
+                                    <!-- Left Hand (Viewer's Left) with Gold Bangle & Index Finger Pointing Down-Right -->
+                                    <g class="animate-point-down">
+                                        <!-- Forearm & Gold Bangle -->
+                                        <path d="M40 390 L78 362 L96 392 L58 418 Z" fill="url(#skinLady)"/>
+                                        <path d="M56 372 L78 404" stroke="url(#goldZari)" stroke-width="6" stroke-linecap="round"/>
+                                        <!-- Palm & Curled Fingers -->
+                                        <circle cx="95" cy="378" r="24" fill="url(#skinLady)"/>
+                                        <!-- Thumb Raised Upward -->
+                                        <path d="M96 360 L114 334 C118 328 127 333 123 341 L110 368 Z" fill="url(#skinLady)"/>
+                                        <!-- Index Finger Pointing Downward at Angle -->
+                                        <path d="M108 382 L134 432 C138 440 126 446 121 438 L94 392 Z" fill="url(#skinLady)"/>
+                                        <!-- Curled Middle/Ring/Pinky Fingers -->
+                                        <ellipse cx="94" cy="395" rx="15" ry="9" fill="#dfa185"/>
+                                    </g>
+
+                                    <!-- Right Hand (Viewer's Right) with Thumb Up & Index Finger Pointing Down-Left -->
+                                    <g class="animate-point-down">
+                                        <!-- Forearm -->
+                                        <path d="M330 390 L292 362 L274 392 L312 418 Z" fill="url(#skinLady)"/>
+                                        <!-- Palm -->
+                                        <circle cx="275" cy="378" r="24" fill="url(#skinLady)"/>
+                                        <!-- Thumb Raised Upward -->
+                                        <path d="M274 360 L256 334 C252 328 243 333 247 341 L260 368 Z" fill="url(#skinLady)"/>
+                                        <!-- Index Finger Pointing Downward at Angle -->
+                                        <path d="M262 382 L236 432 C232 440 244 446 249 438 L276 392 Z" fill="url(#skinLady)"/>
+                                        <!-- Curled Middle/Ring/Pinky Fingers -->
+                                        <ellipse cx="276" cy="395" rx="15" ry="9" fill="#dfa185"/>
+                                    </g>
+                                </g>
+
+                                <!-- Glowing Downward Target Arrows Below Her Pointing Fingers -->
+                                <g class="animate-point-down" opacity="0.9">
+                                    <circle cx="285" cy="485" r="16" fill="#10b981"/>
+                                    <path d="M285 477 L285 491 M279 486 L285 492 L291 486" stroke="#03050a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                                    <circle cx="395" cy="485" r="16" fill="#f59e0b"/>
+                                    <path d="M395 477 L395 491 M389 486 L395 492 L401 486" stroke="#03050a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                                </g>
+                            </svg>
+
+                            <!-- Bottom Advertising Caption Inside Poster -->
+                            <div class="relative z-20 bg-slate-950/90 backdrop-blur-md border border-amber-400/40 rounded-2xl p-4 text-center shadow-2xl">
+                                <p class="text-[11px] font-extrabold uppercase tracking-widest text-amber-400 mb-1">
+                                    👇 Look Below at What Your Expense Tracker Includes 👇
+                                </p>
+                                <p class="font-display font-bold text-sm sm:text-base text-white">
+                                    “Save Money • Track Money — Every Single Rupee Counts for Our Family!”
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Floating Advertising Badge 1 (Left) -->
+                        <div class="animate-float-slow absolute -left-3 sm:-left-6 top-16 z-30 theme-card rounded-2xl px-3.5 py-2.5 border border-emerald-500/50 shadow-2xl flex items-center gap-2.5 select-none">
+                            <div class="w-9 h-9 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center font-bold text-base">
+                                <i class="fa-solid fa-sack-dollar"></i>
+                            </div>
+                            <div>
+                                <p class="text-[10px] font-bold uppercase tracking-wider text-emerald-500">Smart Habit</p>
+                                <p class="font-display font-extrabold text-xs sm:text-sm">Penny Penny Makes Many</p>
+                            </div>
+                        </div>
+
+                        <!-- Floating Advertising Badge 2 (Right) -->
+                        <div class="animate-float-reverse absolute -right-3 sm:-right-6 top-28 z-30 theme-card rounded-2xl px-3.5 py-2.5 border border-amber-500/50 shadow-2xl flex items-center gap-2.5 select-none">
+                            <div class="w-9 h-9 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-bold text-base">
+                                <i class="fa-solid fa-camera"></i>
+                            </div>
+                            <div>
+                                <p class="text-[10px] font-bold uppercase tracking-wider text-amber-500">100% Proof</p>
+                                <p class="font-display font-extrabold text-xs sm:text-sm">Records with Image</p>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- 4. PROMOTIONAL GRAPHIC BANNERS: SAVE MONEY & TRACK MONEY            -->
+    <!-- =================================================================== -->
+    <section class="relative z-10 py-10">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                <!-- Banner 1: SAVE MONEY -->
+                <div class="info-hover-card theme-card rounded-3xl p-6 sm:p-8 border-l-8 border-l-emerald-500 relative overflow-hidden">
+                    <div class="absolute -right-8 -bottom-8 w-36 h-36 bg-emerald-500/15 rounded-full blur-2xl"></div>
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="space-y-2">
+                            <span class="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-500 font-display font-extrabold text-xs uppercase tracking-widest">
+                                Banner 01 • Save Money
+                            </span>
+                            <h2 class="font-display font-extrabold text-2xl sm:text-3xl">
+                                Turn Spare Change into <span class="text-emerald-500">Dream Wealth</span>
+                            </h2>
+                            <p class="theme-text-muted text-sm leading-relaxed">
+                                Whether it is ₹50 saved from daily commute or ₹500 from weekend shopping, our <strong>Dream Money</strong> tracker visually shows how small coins build lakhs over time.
+                            </p>
+                        </div>
+                        <div class="w-16 h-16 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-500 text-3xl shrink-0">
+                            <i class="fa-solid fa-seedling"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Banner 2: TRACK MONEY -->
+                <div class="info-hover-card theme-card rounded-3xl p-6 sm:p-8 border-l-8 border-l-amber-500 relative overflow-hidden">
+                    <div class="absolute -right-8 -bottom-8 w-36 h-36 bg-amber-500/15 rounded-full blur-2xl"></div>
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="space-y-2">
+                            <span class="px-3 py-1 rounded-full bg-amber-500/20 text-amber-500 font-display font-extrabold text-xs uppercase tracking-widest">
+                                Banner 02 • Track Money
+                            </span>
+                            <h2 class="font-display font-extrabold text-2xl sm:text-3xl">
+                                Zero Forgotten Bills & <span class="text-amber-500">Photo Proof</span>
+                            </h2>
+                            <p class="theme-text-muted text-sm leading-relaxed">
+                                Every rupee spent gets a photo receipt, and every rupee lent to a friend gets a smart <strong>Pending Money Bill with Info Titles</strong> so you never lose track of your hard-earned cash.
+                            </p>
+                        </div>
+                        <div class="w-16 h-16 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-500 text-3xl shrink-0">
+                            <i class="fa-solid fa-magnifying-glass-dollar"></i>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- 5. WHAT IT WILL INCLUDE — PURE INFORMATIONAL SHOWCASE               -->
+    <!-- =================================================================== -->
+    <section class="relative z-10 py-14 space-y-20">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-20">
+
+            <!-- Section Heading -->
+            <div class="text-center max-w-3xl mx-auto space-y-3">
+                <span class="px-4 py-1.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-500 font-display font-extrabold text-xs uppercase tracking-widest">
+                    Complete Feature Information Guide
+                </span>
+                <h2 class="font-display font-extrabold text-3xl sm:text-5xl">
+                    What <span class="text-gradient-gold">Your Expense Tracker</span> Will Include
+                </h2>
+                <p class="theme-text-muted text-sm sm:text-base">
+                    Explore our 3 flagship modules below. Hover over any graphic card to experience the visual design!
+                </p>
+            </div>
+
+            <!-- =============================================================== -->
+            <!-- INFO SHOWCASE 1: DREAM MONEY                                    -->
+            <!-- =============================================================== -->
+            <div class="space-y-8">
+                <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-emerald-500/30 pb-4">
+                    <div class="flex items-center gap-4">
+                        <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-600 text-slate-950 flex items-center justify-center text-2xl font-bold shadow-lg">
+                            <i class="fa-solid fa-piggy-bank"></i>
+                        </div>
+                        <div>
+                            <span class="text-xs font-extrabold uppercase tracking-widest text-emerald-500">Included Feature #01</span>
+                            <h3 class="font-display font-extrabold text-2xl sm:text-3xl">1. Dream Money (Family Milestone Vaults)</h3>
+                        </div>
+                    </div>
+                    <p class="theme-text-muted text-xs sm:text-sm max-w-md">
+                        Dedicated visual savings jars where every penny saved moves your family closer to life goals.
+                    </p>
+                </div>
+
+                <!-- 3 Static Informational Cards for Dream Money -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    
+                    <!-- Dream Info Card 1 -->
+                    <div class="info-hover-card theme-card rounded-3xl p-6 space-y-5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-3xl">🏍️</span>
+                            <span class="px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-500 font-display font-bold text-xs">
+                                82% Saved • Info Preview
+                            </span>
+                        </div>
+                        <div>
+                            <h4 class="font-display font-extrabold text-xl">Dream Bike & Family Car Fund</h4>
+                            <p class="theme-text-muted text-xs sm:text-sm mt-1">
+                                Shows how daily small deposits build up toward your dream vehicle without heavy loan stress.
+                            </p>
+                        </div>
+                        <div class="theme-inner rounded-2xl p-4 space-y-2">
+                            <div class="flex justify-between text-xs font-bold">
+                                <span class="text-emerald-500">Saved: ₹1,84,500</span>
+                                <span class="theme-text-muted">Goal: ₹2,25,000</span>
+                            </div>
+                            <div class="w-full h-3 bg-slate-500/20 rounded-full overflow-hidden">
+                                <div class="h-full w-[82%] bg-gradient-to-r from-emerald-500 to-amber-400 rounded-full"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dream Info Card 2 -->
+                    <div class="info-hover-card theme-card rounded-3xl p-6 space-y-5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-3xl">🎓</span>
+                            <span class="px-3 py-1 rounded-full bg-amber-500/15 text-amber-500 font-display font-bold text-xs">
+                                75% Saved • Info Preview
+                            </span>
+                        </div>
+                        <div>
+                            <h4 class="font-display font-extrabold text-xl">Child's Future & Gold Vault</h4>
+                            <p class="theme-text-muted text-xs sm:text-sm mt-1">
+                                Track long-term family savings for your child's higher education and festive gold milestones.
+                            </p>
+                        </div>
+                        <div class="theme-inner rounded-2xl p-4 space-y-2">
+                            <div class="flex justify-between text-xs font-bold">
+                                <span class="text-amber-500">Saved: ₹3,75,000</span>
+                                <span class="theme-text-muted">Goal: ₹5,00,000</span>
+                            </div>
+                            <div class="w-full h-3 bg-slate-500/20 rounded-full overflow-hidden">
+                                <div class="h-full w-[75%] bg-gradient-to-r from-amber-500 to-emerald-400 rounded-full"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dream Info Card 3 -->
+                    <div class="info-hover-card theme-card rounded-3xl p-6 space-y-5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-3xl">🏡</span>
+                            <span class="px-3 py-1 rounded-full bg-blue-500/15 text-blue-500 font-display font-bold text-xs">
+                                90% Saved • Info Preview
+                            </span>
+                        </div>
+                        <div>
+                            <h4 class="font-display font-extrabold text-xl">Family Holiday & Emergency Fund</h4>
+                            <p class="theme-text-muted text-xs sm:text-sm mt-1">
+                                Keep a visual safety net for medical peace of mind and memorable annual family vacations.
+                            </p>
+                        </div>
+                        <div class="theme-inner rounded-2xl p-4 space-y-2">
+                            <div class="flex justify-between text-xs font-bold">
+                                <span class="text-blue-500">Saved: ₹1,08,000</span>
+                                <span class="theme-text-muted">Goal: ₹1,20,000</span>
+                            </div>
+                            <div class="w-full h-3 bg-slate-500/20 rounded-full overflow-hidden">
+                                <div class="h-full w-[90%] bg-gradient-to-r from-blue-500 to-emerald-400 rounded-full"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- =============================================================== -->
+            <!-- INFO SHOWCASE 2: RECORDS WITH IMAGE                             -->
+            <!-- =============================================================== -->
+            <div class="space-y-8">
+                <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-amber-500/30 pb-4">
+                    <div class="flex items-center gap-4">
+                        <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-slate-950 flex items-center justify-center text-2xl font-bold shadow-lg">
+                            <i class="fa-solid fa-camera-retro"></i>
+                        </div>
+                        <div>
+                            <span class="text-xs font-extrabold uppercase tracking-widest text-amber-500">Included Feature #02</span>
+                            <h3 class="font-display font-extrabold text-2xl sm:text-3xl">2. Expense Records with Image (Visual Bill Proof)</h3>
+                        </div>
+                    </div>
+                    <p class="theme-text-muted text-xs sm:text-sm max-w-md">
+                        Every expense entry includes a photo snapshot of the bill, receipt, or item so your family always has complete clarity.
+                    </p>
+                </div>
+
+                <!-- 3 Static Informational Cards with Receipt Images -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    
+                    <!-- Photo Record 1 -->
+                    <div class="info-hover-card theme-card rounded-3xl overflow-hidden group">
+                        <div class="h-44 overflow-hidden relative">
+                            <img 
+                                src="https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=600&q=80" 
+                                alt="Supermarket Grocery Receipt" 
+                                class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                            >
+                            <div class="absolute top-3 left-3 px-3 py-1 rounded-full bg-slate-950/80 text-amber-300 text-xs font-bold flex items-center gap-1.5">
+                                <i class="fa-solid fa-camera"></i> Bill Image Attached
+                            </div>
+                            <div class="absolute bottom-3 right-3 px-3 py-1 rounded-xl bg-emerald-500 text-slate-950 font-display font-extrabold text-sm">
+                                ₹2,450
+                            </div>
+                        </div>
+                        <div class="p-5 space-y-2">
+                            <span class="text-[11px] font-bold uppercase tracking-wider text-amber-500">🛒 Groceries & Household</span>
+                            <h4 class="font-display font-bold text-lg">Monthly Supermarket Grocery Bill</h4>
+                            <p class="theme-text-muted text-xs leading-relaxed">
+                                Attach a photo of your long supermarket receipt to compare item prices month-over-month.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Photo Record 2 -->
+                    <div class="info-hover-card theme-card rounded-3xl overflow-hidden group">
+                        <div class="h-44 overflow-hidden relative">
+                            <img 
+                                src="https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80" 
+                                alt="Home Utility & Tax Invoice" 
+                                class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                            >
+                            <div class="absolute top-3 left-3 px-3 py-1 rounded-full bg-slate-950/80 text-amber-300 text-xs font-bold flex items-center gap-1.5">
+                                <i class="fa-solid fa-camera"></i> Receipt Photo Saved
+                            </div>
+                            <div class="absolute bottom-3 right-3 px-3 py-1 rounded-xl bg-amber-400 text-slate-950 font-display font-extrabold text-sm">
+                                ₹1,890
+                            </div>
+                        </div>
+                        <div class="p-5 space-y-2">
+                            <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-500">💡 Electricity & Broadband</span>
+                            <h4 class="font-display font-bold text-lg">Home Utility & Wi-Fi Bill Snapshot</h4>
+                            <p class="theme-text-muted text-xs leading-relaxed">
+                                Keep warranty slips, electricity receipts, and tax invoices safely stored alongside the date and amount.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Photo Record 3 -->
+                    <div class="info-hover-card theme-card rounded-3xl overflow-hidden group">
+                        <div class="h-44 overflow-hidden relative">
+                            <img 
+                                src="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=600&q=80" 
+                                alt="Family Restaurant Dinner Receipt" 
+                                class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                            >
+                            <div class="absolute top-3 left-3 px-3 py-1 rounded-full bg-slate-950/80 text-amber-300 text-xs font-bold flex items-center gap-1.5">
+                                <i class="fa-solid fa-camera"></i> Dining Bill Snap
+                            </div>
+                            <div class="absolute bottom-3 right-3 px-3 py-1 rounded-xl bg-blue-500 text-white font-display font-extrabold text-sm">
+                                ₹1,400
+                            </div>
+                        </div>
+                        <div class="p-5 space-y-2">
+                            <span class="text-[11px] font-bold uppercase tracking-wider text-blue-500">🍲 Family Outing & Dining</span>
+                            <h4 class="font-display font-bold text-lg">Weekend Family Dinner Receipt</h4>
+                            <p class="theme-text-muted text-xs leading-relaxed">
+                                Snap the table bill right after dinner so your weekend entertainment budget stays crystal clear.
+                            </p>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- =============================================================== -->
+            <!-- INFO SHOWCASE 3: PENDING MONEY & CREATE/SEND BILL INFO TITLES   -->
+            <!-- =============================================================== -->
+            <div class="space-y-8">
+                <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-blue-500/30 pb-4">
+                    <div class="flex items-center gap-4">
+                        <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center text-2xl font-bold shadow-lg">
+                            <i class="fa-solid fa-file-invoice-dollar"></i>
+                        </div>
+                        <div>
+                            <span class="text-xs font-extrabold uppercase tracking-widest text-blue-500">Included Feature #03</span>
+                            <h3 class="font-display font-extrabold text-2xl sm:text-3xl">3. Pending Money — Create & Send Bill with Info Titles</h3>
+                        </div>
+                    </div>
+                    <p class="theme-text-muted text-xs sm:text-sm max-w-md">
+                        If someone's money is pending, you can create and send a clean mini-bill using smart, polite <strong>Info Titles</strong>!
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                    
+                    <!-- Left Column: Visual Showcase of Ready-Made Bill Info Titles -->
+                    <div class="lg:col-span-6 space-y-5">
+                        <div class="theme-card rounded-3xl p-6 sm:p-7 space-y-5">
+                            <div class="flex items-center justify-between">
+                                <span class="px-3 py-1 rounded-full bg-blue-500/15 text-blue-500 font-display font-bold text-xs uppercase">
+                                    Smart Info Titles Library
+                                </span>
+                                <span class="text-xs theme-text-muted font-semibold">Hover to preview</span>
+                            </div>
+
+                            <h4 class="font-display font-extrabold text-xl sm:text-2xl">
+                                Add Custom “Info Titles” When Someone's Money is Pending
+                            </h4>
+                            <p class="theme-text-muted text-sm leading-relaxed">
+                                Instead of awkward reminders, pick or add a clear <strong>Bill Info Title</strong> that explains exactly what the pending amount is for:
+                            </p>
+
+                            <!-- Hover-Animated Info Title Badges (Non-operational Info Display) -->
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                                <div class="theme-inner info-pill-hover rounded-2xl p-3.5 flex items-center gap-3">
+                                    <span class="text-xl">🍽️</span>
+                                    <div>
+                                        <p class="font-display font-bold text-xs sm:text-sm">Weekend Dinner Split</p>
+                                        <p class="text-[11px] text-emerald-500 font-semibold">Pending Share: ₹1,850</p>
+                                    </div>
+                                </div>
+
+                                <div class="theme-inner info-pill-hover rounded-2xl p-3.5 flex items-center gap-3">
+                                    <span class="text-xl">🚕</span>
+                                    <div>
+                                        <p class="font-display font-bold text-xs sm:text-sm">Shared Cab & Movie Tickets</p>
+                                        <p class="text-[11px] text-amber-500 font-semibold">Pending Share: ₹1,200</p>
+                                    </div>
+                                </div>
+
+                                <div class="theme-inner info-pill-hover rounded-2xl p-3.5 flex items-center gap-3">
+                                    <span class="text-xl">⚡</span>
+                                    <div>
+                                        <p class="font-display font-bold text-xs sm:text-sm">Flat Wi-Fi & Electricity Share</p>
+                                        <p class="text-[11px] text-blue-500 font-semibold">Pending Share: ₹950</p>
+                                    </div>
+                                </div>
+
+                                <div class="theme-inner info-pill-hover rounded-2xl p-3.5 flex items-center gap-3">
+                                    <span class="text-xl">🤝</span>
+                                    <div>
+                                        <p class="font-display font-bold text-xs sm:text-sm">Emergency Cash Lent</p>
+                                        <p class="text-[11px] text-emerald-500 font-semibold">Pending Share: ₹5,000</p>
+                                    </div>
+                                </div>
+
+                                <div class="theme-inner info-pill-hover rounded-2xl p-3.5 flex items-center gap-3">
+                                    <span class="text-xl">🎁</span>
+                                    <div>
+                                        <p class="font-display font-bold text-xs sm:text-sm">Festival Group Gift Split</p>
+                                        <p class="text-[11px] text-amber-500 font-semibold">Pending Share: ₹1,500</p>
+                                    </div>
+                                </div>
+
+                                <div class="theme-inner info-pill-hover rounded-2xl p-3.5 flex items-center gap-3">
+                                    <span class="text-xl">💼</span>
+                                    <div>
+                                        <p class="font-display font-bold text-xs sm:text-sm">Freelance Work Milestone</p>
+                                        <p class="text-[11px] text-blue-500 font-semibold">Pending Share: ₹4,500</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Visual Sample of Generated Pending Bill Card -->
+                    <div class="lg:col-span-6">
+                        <div class="info-hover-card theme-card rounded-3xl overflow-hidden border-2 border-blue-500/40 shadow-2xl">
+                            
+                            <!-- Sample Bill Header -->
+                            <div class="bg-gradient-to-r from-slate-900 via-blue-950 to-emerald-950 p-6 text-white flex items-center justify-between">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-amber-400 to-emerald-400 text-slate-950 flex items-center justify-center font-display font-extrabold text-xl">
+                                        ₹
+                                    </div>
+                                    <div>
+                                        <p class="font-display font-bold text-base">Your Expense Tracker — Bill</p>
+                                        <p class="text-[11px] text-amber-300">“Penny penny makes many”</p>
+                                    </div>
+                                </div>
+                                <span class="px-3 py-1 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 font-display font-bold text-xs uppercase">
+                                    Sample Bill Info
+                                </span>
+                            </div>
+
+                            <!-- Sample Bill Body -->
+                            <div class="p-6 space-y-5">
+                                <div class="grid grid-cols-2 gap-4 theme-inner rounded-2xl p-4">
+                                    <div>
+                                        <p class="text-[10px] uppercase tracking-wider theme-text-muted font-bold">Pending Money From</p>
+                                        <p class="font-display font-extrabold text-base sm:text-lg mt-0.5">Rahul Sharma</p>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="text-[10px] uppercase tracking-wider theme-text-muted font-bold">Bill Status</p>
+                                        <p class="font-display font-bold text-sm text-amber-500 mt-0.5">Payment Pending</p>
+                                    </div>
+                                </div>
+
+                                <div class="theme-inner rounded-2xl p-4 flex items-center justify-between gap-4 border-l-4 border-l-blue-500">
+                                    <div>
+                                        <span class="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-blue-500/20 text-blue-500">
+                                            Info Title
+                                        </span>
+                                        <p class="font-display font-extrabold text-base sm:text-lg mt-1">
+                                            Weekend Dinner Split & Dessert
+                                        </p>
+                                        <p class="text-xs theme-text-muted mt-0.5">
+                                            Ready to share via WhatsApp / SMS with UPI Note
+                                        </p>
+                                    </div>
+                                    <div class="text-right shrink-0">
+                                        <p class="text-[10px] uppercase theme-text-muted font-bold">Amount Due</p>
+                                        <p class="font-display font-extrabold text-2xl sm:text-3xl text-emerald-500">₹1,850</p>
+                                    </div>
+                                </div>
+
+                                <div class="flex items-center justify-between text-xs theme-text-muted pt-1">
+                                    <span><i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> Instant Bill Format</span>
+                                    <span><i class="fa-solid fa-bolt text-amber-500 mr-1"></i> Polite Payment Reminder</span>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- 6. BOTTOM CALL-TO-ACTION BANNER & FOOTER                            -->
+    <!-- =================================================================== -->
+    <section class="relative z-10 py-14">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="theme-card rounded-3xl p-8 sm:p-12 border-2 border-emerald-500/40 text-center space-y-6 relative overflow-hidden">
+                <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/15 text-amber-500 font-display font-bold text-xs uppercase tracking-widest">
+                    🪙 Start Your Family Savings Journey
+                </div>
+                <h2 class="font-display font-extrabold text-3xl sm:text-5xl">
+                    Ready to Save Money & Track Money?
+                </h2>
+                <p class="theme-text-muted text-base sm:text-lg max-w-2xl mx-auto">
+                    Join <strong class="text-emerald-500">Your Expense Tracker</strong> today—because <strong class="text-amber-500">“Penny penny makes many!”</strong>
+                </p>
+                <div class="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
+                    <button 
+                        onclick="openInfoPopup('start')" 
+                        class="btn-clickable w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-emerald-400 to-teal-400 text-slate-950 font-display font-extrabold text-base sm:text-lg shadow-xl shadow-emerald-500/30 hover:scale-105 transition flex items-center justify-center gap-3"
+                    >
+                        <span>Click Here to Start</span>
+                        <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                    <button 
+                        onclick="openInfoPopup('register')" 
+                        class="btn-clickable w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-display font-extrabold text-base sm:text-lg shadow-xl shadow-amber-500/30 hover:scale-105 transition flex items-center justify-center gap-2"
+                    >
+                        <i class="fa-solid fa-user-plus"></i>
+                        <span>Register Free</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer class="border-t border-slate-500/20 py-8 text-center text-xs sm:text-sm theme-text-muted">
+        <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p class="font-display font-bold">
+                © 2026 <span class="text-emerald-500">Your Expense Tracker</span> — “Penny penny makes many.”
+            </p>
+            <p>
+                Dream Money • Records with Image • Pending Money Bill Info Titles
+            </p>
+        </div>
+    </footer>
+
+    <!-- =================================================================== -->
+    <!-- 7. PURE INFORMATIONAL MODAL FOR CLICKABLE BUTTONS (NO FORMS/INPUTS) -->
+    <!-- =================================================================== -->
+    <div id="infoModal" onclick="closeInfoPopup()" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+        <div onclick="event.stopPropagation()" class="theme-card rounded-3xl max-w-md w-full p-6 sm:p-8 border-2 border-emerald-500/50 text-center space-y-5 relative">
+            <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-400 to-amber-400 text-slate-950 text-3xl font-extrabold flex items-center justify-center mx-auto shadow-lg">
+                ₹
+            </div>
+            <span id="modalBadge" class="inline-block px-3.5 py-1 rounded-full bg-emerald-500/20 text-emerald-500 font-display font-bold text-xs uppercase tracking-widest">
+                Welcome to Your Expense Tracker
+            </span>
+            <h3 id="modalTitle" class="font-display font-extrabold text-2xl sm:text-3xl">
+                Penny Penny Makes Many!
+            </h3>
+            <p id="modalDescription" class="theme-text-muted text-sm leading-relaxed">
+                Your all-in-one family expense companion includes <strong>Dream Money Vaults</strong>, <strong>Expense Records with Image Proof</strong>, and <strong>Instant Pending Money Bills with Info Titles</strong>.
+            </p>
+            <div class="theme-inner rounded-2xl p-4 text-left space-y-2 text-xs">
+                <p class="font-bold text-emerald-500">✓ Save Money: Build Dream Money goals step by step</p>
+                <p class="font-bold text-amber-500">✓ Track Money: Attach receipt photos to every record</p>
+                <p class="font-bold text-blue-500">✓ Pending Dues: Send polite bills with ready Info Titles</p>
+            </div>
+            <button 
+                onclick="closeInfoPopup()" 
+                class="btn-clickable w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-amber-400 text-slate-950 font-display font-extrabold text-sm shadow-lg"
+            >
+                Got It — Back to Info Page
+            </button>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- MINIMAL JAVASCRIPT: ONLY THEME TOGGLE & INFO BUTTON POPUP           -->
+    <!-- =================================================================== -->
+    <script>
+        // Switch between Black/Dark Background and White/Light Background
+        function setPageTheme(mode) {
+            const htmlEl = document.documentElement;
+            const btnDark = document.getElementById('btnDarkBg');
+            const btnLight = document.getElementById('btnLightBg');
+
+            if (mode === 'light') {
+                htmlEl.classList.remove('dark');
+                btnLight.className = 'btn-clickable px-3 sm:px-4 py-2 rounded-xl font-display font-bold text-xs sm:text-sm flex items-center gap-1.5 transition bg-white text-slate-950 shadow-md border border-amber-500/50';
+                btnDark.className = 'btn-clickable px-3 sm:px-4 py-2 rounded-xl font-display font-bold text-xs sm:text-sm flex items-center gap-1.5 transition text-slate-500 hover:text-slate-900';
+            } else {
+                htmlEl.classList.add('dark');
+                btnDark.className = 'btn-clickable px-3 sm:px-4 py-2 rounded-xl font-display font-bold text-xs sm:text-sm flex items-center gap-1.5 transition bg-slate-900 text-amber-300 shadow-md border border-amber-400/40';
+                btnLight.className = 'btn-clickable px-3 sm:px-4 py-2 rounded-xl font-display font-bold text-xs sm:text-sm flex items-center gap-1.5 transition text-slate-400 hover:text-white';
+            }
+        }
+
+        // Open Pure Informational Popup when clicking "Register" or "Click Here to Start"
+        function openInfoPopup(type) {
+            const modal = document.getElementById('infoModal');
+            const badge = document.getElementById('modalBadge');
+            const title = document.getElementById('modalTitle');
+            const desc = document.getElementById('modalDescription');
+
+            if (type === 'register') {
+                badge.textContent = '✨ Free Family Registration Info';
+                title.textContent = 'Register on Your Expense Tracker';
+                desc.innerHTML = 'Create your family account to unlock <strong>Dream Money</strong> goals, <strong>Records with Image</strong>, and <strong>Pending Money Bill Info Titles</strong>. Remember: <em>Penny penny makes many!</em>';
+            } else {
+                badge.textContent = '🚀 Getting Started Info';
+                title.textContent = 'Save Money • Track Money';
+                desc.innerHTML = 'Start tracking every rupee with photo proof and smart pending bill titles. Built for Indian families who believe <strong>“Penny penny makes many!”</strong>';
+            }
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeInfoPopup() {
+            const modal = document.getElementById('infoModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+    </script>
+</body>
+</html>
