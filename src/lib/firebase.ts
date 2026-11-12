@@ -11,7 +11,6 @@ import {
 import {
   getFirestore,
   doc,
-  getDoc,
   getDocFromServer,
   setDoc,
   updateDoc,
@@ -39,7 +38,6 @@ import {
   DEFAULT_PDF_HEADER_CONFIG,
   getLocalGlobalConfigUpdatedAt,
   getLocalUsersUpdatedAt,
-  hasVaultContent,
   loadDeletedUserIdsFromLocal,
   loadProofImageLocally,
   markUserIdDeletedLocally,
@@ -379,7 +377,6 @@ export function subscribeToCloudUsers(callbacks: {
 
       // Merge localUsers and cloudUsersMap without ever resurrecting deletedIds or losing newer local edits
       const mergedMap = new Map<string, UserAccount>();
-      const usersToPushToCloud: UserAccount[] = [];
 
       for (const [id, cUser] of cloudUsersMap.entries()) {
         mergedMap.set(id, cUser);
@@ -389,43 +386,27 @@ export function subscribeToCloudUsers(callbacks: {
         if (lUser.id !== 'user-admin' && deletedIds.has(lUser.id)) {
           continue;
         }
-        const lTime = Date.parse(lUser.updatedAt || lUser.createdAt || '');
-        const isDefaultFallback = Number.isNaN(lTime) || lTime <= 0;
         const cUser = mergedMap.get(lUser.id);
         if (!cUser) {
           // Local user was created locally and hasn't synced to cloud yet
           mergedMap.set(lUser.id, lUser);
-          if (!isDefaultFallback) {
-            usersToPushToCloud.push(lUser);
-          }
-        } else if (!isDefaultFallback) {
+        } else {
+          const lTime = Date.parse(lUser.updatedAt || lUser.createdAt || '');
           const cTime = Date.parse(cUser.updatedAt || cUser.createdAt || '');
           if (
             localIsNewerOverall ||
-            Number.isNaN(cTime) ||
-            lTime > cTime
+            (!Number.isNaN(lTime) && (Number.isNaN(cTime) || lTime >= cTime))
           ) {
-            const mergedUser: UserAccount = {
+            mergedMap.set(lUser.id, {
               ...cUser,
               ...lUser,
               avatarThumbnailDataUrl:
                 lUser.avatarThumbnailDataUrl ||
                 cUser.avatarThumbnailDataUrl ||
                 loadProofImageLocally(`user-avatar-${lUser.id}`),
-            };
-            mergedMap.set(lUser.id, mergedUser);
-            if (lTime > cTime) {
-              usersToPushToCloud.push(mergedUser);
-            }
+            });
           }
         }
-      }
-
-      if (!seededInitial && usersToPushToCloud.length > 0) {
-        seededInitial = true;
-        syncUsersToCloud(usersToPushToCloud).catch(() => {
-          // ignore offline fallback
-        });
       }
 
       const mergedList = Array.from(mergedMap.values());
@@ -447,72 +428,6 @@ export function subscribeToCloudUsers(callbacks: {
       console.warn('Cloud users sync listener notice:', err?.message || err);
     }
   );
-}
-
-/**
- * Explicitly fetches all users from `/appUsers` in Firestore (used on boot/login so Incognito/Tor has immediate access).
- */
-export async function fetchCloudUsersFromServer(
-  localUsers: UserAccount[]
-): Promise<UserAccount[] | null> {
-  try {
-    const snap = await getDocs(collection(db, 'appUsers'));
-    if (snap.empty) {
-      return null;
-    }
-    const deletedIds = new Set(loadDeletedUserIdsFromLocal());
-    const mergedMap = new Map<string, UserAccount>();
-
-    for (const d of snap.docs) {
-      const data = d.data();
-      if (typeof data.userJson === 'string') {
-        try {
-          const parsed = JSON.parse(data.userJson) as UserAccount;
-          if (
-            parsed &&
-            parsed.id &&
-            parsed.username &&
-            (parsed.id === 'user-admin' || !deletedIds.has(parsed.id))
-          ) {
-            mergedMap.set(parsed.id, {
-              ...parsed,
-              avatarThumbnailDataUrl:
-                parsed.avatarThumbnailDataUrl ||
-                loadProofImageLocally(`user-avatar-${parsed.id}`),
-            });
-          }
-        } catch {
-          // ignore malformed doc
-        }
-      }
-    }
-
-    for (const lUser of localUsers) {
-      if (lUser.id !== 'user-admin' && deletedIds.has(lUser.id)) continue;
-      const lTime = Date.parse(lUser.updatedAt || lUser.createdAt || '');
-      const isDefaultFallback = Number.isNaN(lTime) || lTime <= 0;
-      const cUser = mergedMap.get(lUser.id);
-      if (!cUser) {
-        mergedMap.set(lUser.id, lUser);
-      } else if (!isDefaultFallback) {
-        const cTime = Date.parse(cUser.updatedAt || cUser.createdAt || '');
-        if (!Number.isNaN(lTime) && (Number.isNaN(cTime) || lTime > cTime)) {
-          mergedMap.set(lUser.id, {
-            ...cUser,
-            ...lUser,
-          });
-        }
-      }
-    }
-
-    const mergedList = Array.from(mergedMap.values());
-    if (mergedList.length === 0) return null;
-    const { users: sanitizedUsers } = ensureZeroKnowledgeUsers(mergedList);
-    saveUsersToLocal(sanitizedUsers, false);
-    return sanitizedUsers;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -745,84 +660,6 @@ export async function resetEntireCloudPortal(
  * people, expected bills, and dream vaults automatically sync across Desktop & Mobile.
  * Local vault changes with a newer `updatedAt` timestamp are never overwritten by stale cloud snapshots.
  */
-function hydrateCloudVaultPayload(parsed: UserVaultData, fallbackUserId: string): UserVaultData {
-  const hydrated: UserVaultData = {
-    ...parsed,
-    userId: parsed.userId || fallbackUserId,
-    nextRecordNumber:
-      parsed.nextRecordNumber && parsed.nextRecordNumber >= 100 ? parsed.nextRecordNumber : 100,
-    accounts: (parsed.accounts || []).map((acc) => {
-      if (
-        acc.bankLogoUrl &&
-        acc.bankLogoUrl.startsWith('data:image/') &&
-        !acc.bankLogoUrl.startsWith('data:image/svg+xml')
-      ) {
-        saveProofImageLocally(`acc-logo-${acc.id}`, acc.bankLogoUrl);
-      }
-      return {
-        ...acc,
-        bankLogoUrl: acc.bankLogoUrl || loadProofImageLocally(`acc-logo-${acc.id}`),
-      };
-    }),
-    transactions: (parsed.transactions || []).map((tx) => {
-      const pid = tx.proofId || (tx.proofImageDataUrl ? `prf-${tx.id}` : undefined);
-      if (pid && tx.proofImageDataUrl) {
-        saveProofImageLocally(pid, tx.proofImageDataUrl);
-      }
-      return {
-        ...tx,
-        proofId: pid,
-        proofImageDataUrl: tx.proofImageDataUrl || loadProofImageLocally(pid),
-      };
-    }),
-    people: parsed.people || [],
-    expectedItems: (parsed.expectedItems || []).map((item) => {
-      const pid = item.proofId || (item.proofImageDataUrl ? `prf-exp-${item.id}` : undefined);
-      if (pid && item.proofImageDataUrl) {
-        saveProofImageLocally(pid, item.proofImageDataUrl);
-      }
-      return {
-        ...item,
-        proofId: pid,
-        proofImageDataUrl: item.proofImageDataUrl || loadProofImageLocally(pid),
-      };
-    }),
-    dreamVaults: (parsed.dreamVaults || []).map((dv) => {
-      if (
-        dv.imageUrl &&
-        dv.imageUrl.startsWith('data:image/') &&
-        !dv.imageUrl.startsWith('data:image/svg+xml')
-      ) {
-        saveProofImageLocally(`dream-img-${dv.id}`, dv.imageUrl);
-      }
-      return {
-        ...dv,
-        imageUrl: dv.imageUrl || loadProofImageLocally(`dream-img-${dv.id}`),
-      };
-    }),
-    recurringPayments: parsed.recurringPayments || [],
-    loans: parsed.loans || [],
-    personRecordGroups: (parsed.personRecordGroups || []).map((grp) => ({
-      ...grp,
-      itemsSnapshot: (grp.itemsSnapshot || []).map((snap) => ({
-        ...snap,
-        proofImageDataUrl: snap.proofImageDataUrl || loadProofImageLocally(snap.proofId),
-      })),
-    })),
-    recycleBin: (parsed.recycleBin || []).map((entry) => {
-      if (entry.transaction?.proofId && entry.transaction.proofImageDataUrl) {
-        saveProofImageLocally(entry.transaction.proofId, entry.transaction.proofImageDataUrl);
-      }
-      return entry;
-    }),
-  };
-  return hydrated;
-}
-
-/**
- * Subscribes in real time to `/userVaults/{userId}` so a user's wallets, records, proof images,
- * people, expected bills, loans, and dream vaults automatically sync across Desktop, Mobile, Tor & Incognito.
- */
 export function subscribeToUserCloudVault(
   userId: string,
   callbacks: {
@@ -838,14 +675,22 @@ export function subscribeToUserCloudVault(
     vaultRef,
     (snap) => {
       const localVault = callbacks.getInitialLocalVault();
-      const localHasData = hasVaultContent(localVault);
-
       if (!snap.exists()) {
-        if (!seededInitial && localHasData) {
+        if (!seededInitial) {
           seededInitial = true;
-          saveUserCloudVault(localVault).catch(() => {
-            // ignore offline fallback
-          });
+          const hasData =
+            localVault.accounts.length > 0 ||
+            localVault.transactions.length > 0 ||
+            localVault.people.length > 0 ||
+            localVault.expectedItems.length > 0 ||
+            localVault.dreamVaults.length > 0 ||
+            (localVault.loans || []).length > 0 ||
+            (localVault.recurringPayments || []).length > 0;
+          if (hasData) {
+            saveUserCloudVault(localVault).catch(() => {
+              // ignore offline fallback
+            });
+          }
         }
         return;
       }
@@ -855,51 +700,56 @@ export function subscribeToUserCloudVault(
         try {
           const parsed = JSON.parse(data.vaultJson) as UserVaultData;
           if (parsed && Array.isArray(parsed.accounts) && Array.isArray(parsed.transactions)) {
-            const cloudHasData = hasVaultContent(parsed);
             const localTime = Date.parse(localVault.updatedAt || '');
-            const docServerMs =
-              data.updatedAt && typeof data.updatedAt.toMillis === 'function'
-                ? data.updatedAt.toMillis()
-                : 0;
-            const parsedCloudMs = Date.parse(parsed.updatedAt || '');
-            const cloudTime = !Number.isNaN(parsedCloudMs) && parsedCloudMs > 0 ? parsedCloudMs : docServerMs;
+            const cloudTime = Date.parse(parsed.updatedAt || '');
 
-            // Case 1: Local storage is empty (e.g. Tor / Incognito / new browser) and Cloud has data -> ALWAYS load Cloud!
-            if (!localHasData && cloudHasData) {
-              const hydrated = hydrateCloudVaultPayload(parsed, userId);
-              if (!hydrated.updatedAt || Date.parse(hydrated.updatedAt) <= 0) {
-                hydrated.updatedAt = new Date(cloudTime || Date.now()).toISOString();
-              }
-              saveUserVault(hydrated, true);
-              callbacks.onVault(hydrated);
+            // Never let an older cloud snapshot overwrite newer local changes (records, images, deletions)!
+            if (!Number.isNaN(localTime) && (Number.isNaN(cloudTime) || localTime >= cloudTime)) {
               return;
             }
 
-            // Case 2: Local browser has real data, but Cloud doc is empty placeholder -> push Local to Cloud!
-            if (localHasData && !cloudHasData) {
-              if (!seededInitial) {
-                seededInitial = true;
-                saveUserCloudVault(localVault).catch(() => {
-                  // ignore offline fallback
-                });
+            parsed.accounts = (parsed.accounts || []).map((acc) => ({
+              ...acc,
+              bankLogoUrl: acc.bankLogoUrl || loadProofImageLocally(`acc-logo-${acc.id}`),
+            }));
+            parsed.transactions = (parsed.transactions || []).map((tx) => {
+              const pid = tx.proofId || (tx.proofImageDataUrl ? `prf-${tx.id}` : undefined);
+              if (pid && tx.proofImageDataUrl) {
+                saveProofImageLocally(pid, tx.proofImageDataUrl);
               }
-              return;
-            }
-
-            // Case 3: Both have data (or both are empty) -> compare timestamps
-            if (!Number.isNaN(localTime) && localTime > 0 && (cloudTime <= 0 || localTime >= cloudTime)) {
-              if (!seededInitial && localTime > cloudTime && localHasData) {
-                seededInitial = true;
-                saveUserCloudVault(localVault).catch(() => {
-                  // ignore offline fallback
-                });
+              return {
+                ...tx,
+                proofId: pid,
+                proofImageDataUrl: tx.proofImageDataUrl || loadProofImageLocally(pid),
+              };
+            });
+            parsed.expectedItems = (parsed.expectedItems || []).map((item) => {
+              const pid =
+                item.proofId || (item.proofImageDataUrl ? `prf-exp-${item.id}` : undefined);
+              if (pid && item.proofImageDataUrl) {
+                saveProofImageLocally(pid, item.proofImageDataUrl);
               }
-              return;
-            }
-
-            const hydrated = hydrateCloudVaultPayload(parsed, userId);
-            saveUserVault(hydrated, true);
-            callbacks.onVault(hydrated);
+              return {
+                ...item,
+                proofId: pid,
+                proofImageDataUrl: item.proofImageDataUrl || loadProofImageLocally(pid),
+              };
+            });
+            parsed.dreamVaults = (parsed.dreamVaults || []).map((dv) => {
+              if (
+                dv.imageUrl &&
+                dv.imageUrl.startsWith('data:image/') &&
+                !dv.imageUrl.startsWith('data:image/svg+xml')
+              ) {
+                saveProofImageLocally(`dream-img-${dv.id}`, dv.imageUrl);
+              }
+              return {
+                ...dv,
+                imageUrl: loadProofImageLocally(`dream-img-${dv.id}`) || dv.imageUrl,
+              };
+            });
+            saveUserVault(parsed, true);
+            callbacks.onVault(parsed);
           }
         } catch {
           // ignore malformed JSON
@@ -913,160 +763,47 @@ export function subscribeToUserCloudVault(
 }
 
 /**
- * Actively fetches `/userVaults/{userId}` from Firestore server on login or mount so Tor / Incognito
- * browsers immediately load all accounts, records, loans, people, and investments.
- */
-export async function fetchUserCloudVaultFromServer(
-  userId: string,
-  currentLocalVault?: UserVaultData
-): Promise<UserVaultData | null> {
-  const safeUserId = cleanId(userId);
-  const vaultRef = doc(db, 'userVaults', safeUserId);
-  try {
-    let snap;
-    try {
-      snap = await getDocFromServer(vaultRef);
-    } catch {
-      snap = await getDoc(vaultRef);
-    }
-
-    const localVault = currentLocalVault;
-    const localHasData = hasVaultContent(localVault);
-
-    if (!snap.exists()) {
-      if (localVault && localHasData) {
-        await saveUserCloudVault(localVault);
-      }
-      return null;
-    }
-
-    const data = snap.data();
-    if (data && typeof data.vaultJson === 'string' && data.vaultJson.length >= 2) {
-      const parsed = JSON.parse(data.vaultJson) as UserVaultData;
-      if (parsed && Array.isArray(parsed.accounts) && Array.isArray(parsed.transactions)) {
-        const cloudHasData = hasVaultContent(parsed);
-        const localTime = localVault ? Date.parse(localVault.updatedAt || '') : 0;
-        const docServerMs =
-          data.updatedAt && typeof data.updatedAt.toMillis === 'function'
-            ? data.updatedAt.toMillis()
-            : 0;
-        const parsedCloudMs = Date.parse(parsed.updatedAt || '');
-        const cloudTime = !Number.isNaN(parsedCloudMs) && parsedCloudMs > 0 ? parsedCloudMs : docServerMs;
-
-        if (!localHasData && cloudHasData) {
-          const hydrated = hydrateCloudVaultPayload(parsed, userId);
-          if (!hydrated.updatedAt || Date.parse(hydrated.updatedAt) <= 0) {
-            hydrated.updatedAt = new Date(cloudTime || Date.now()).toISOString();
-          }
-          saveUserVault(hydrated, true);
-          return hydrated;
-        }
-
-        if (localVault && localHasData && !cloudHasData) {
-          await saveUserCloudVault(localVault);
-          return localVault;
-        }
-
-        if (
-          Number.isNaN(localTime) ||
-          localTime <= 0 ||
-          (cloudTime > 0 && cloudTime > localTime)
-        ) {
-          const hydrated = hydrateCloudVaultPayload(parsed, userId);
-          saveUserVault(hydrated, true);
-          return hydrated;
-        }
-
-        if (localVault && localHasData && localTime > cloudTime) {
-          await saveUserCloudVault(localVault);
-        }
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Saves a user's financial vault to `/userVaults/{userId}` in Cloud Firestore.
  */
 export async function saveUserCloudVault(vault: UserVaultData): Promise<void> {
   if (isWriteQuotaPaused()) return;
   const safeUserId = cleanId(vault.userId);
-  const nowIso =
-    vault.updatedAt && Date.parse(vault.updatedAt) > 0
-      ? vault.updatedAt
-      : new Date().toISOString();
-
-  // Rehydrate any locally stored images so Firestore receives proof images, bank logos, and dream images
-  const enrichedVault: UserVaultData = {
+  const nowIso = vault.updatedAt || new Date().toISOString();
+  let vaultJson = JSON.stringify({
     ...vault,
     updatedAt: nowIso,
-    accounts: (vault.accounts || []).map((acc) => ({
-      ...acc,
-      bankLogoUrl: acc.bankLogoUrl || loadProofImageLocally(`acc-logo-${acc.id}`),
-    })),
-    transactions: (vault.transactions || []).map((tx) => {
-      const pid = tx.proofId || (tx.proofImageDataUrl ? `prf-${tx.id}` : undefined);
-      return {
-        ...tx,
-        proofId: pid,
-        proofImageDataUrl: tx.proofImageDataUrl || loadProofImageLocally(pid),
-      };
-    }),
-    expectedItems: (vault.expectedItems || []).map((item) => {
-      const pid = item.proofId || (item.proofImageDataUrl ? `prf-exp-${item.id}` : undefined);
-      return {
-        ...item,
-        proofId: pid,
-        proofImageDataUrl: item.proofImageDataUrl || loadProofImageLocally(pid),
-      };
-    }),
-    dreamVaults: (vault.dreamVaults || []).map((dv) => ({
-      ...dv,
-      imageUrl: dv.imageUrl || loadProofImageLocally(`dream-img-${dv.id}`),
-    })),
-  };
+  });
 
-  let vaultJson = JSON.stringify(enrichedVault);
-
-  // Safety guard: if multiple large images exceed 880KB in a single document, strip only the largest inline dataUrls while keeping smaller ones that fit
+  // Safety guard: if multiple large images exceed 880KB in a single document, strip inline dataUrls for cloud transport while keeping them in local proof storage
   if (vaultJson.length > 880000) {
-    const compactTransactions = (enrichedVault.transactions || []).map((tx) => ({
+    const compactTransactions = (vault.transactions || []).map((tx) => ({
       ...tx,
-      proofImageDataUrl:
-        tx.proofImageDataUrl && tx.proofImageDataUrl.length > 90000
-          ? undefined
-          : tx.proofImageDataUrl,
+      proofImageDataUrl: undefined,
     }));
-    const compactExpected = (enrichedVault.expectedItems || []).map((item) => ({
+    const compactExpected = (vault.expectedItems || []).map((item) => ({
       ...item,
-      proofImageDataUrl:
-        item.proofImageDataUrl && item.proofImageDataUrl.length > 90000
-          ? undefined
-          : item.proofImageDataUrl,
+      proofImageDataUrl: undefined,
     }));
     vaultJson = JSON.stringify({
-      ...enrichedVault,
+      ...vault,
       transactions: compactTransactions,
       expectedItems: compactExpected,
       updatedAt: nowIso,
     });
   }
   if (vaultJson.length > 880000) {
-    const compactDreams = (enrichedVault.dreamVaults || []).map((dv) => ({
+    const compactDreams = (vault.dreamVaults || []).map((dv) => ({
       ...dv,
       imageUrl:
         dv.imageUrl && dv.imageUrl.length > 50000 ? undefined : dv.imageUrl,
     }));
     vaultJson = JSON.stringify({
-      ...enrichedVault,
-      transactions: (enrichedVault.transactions || []).map((tx) => ({
+      ...vault,
+      transactions: (vault.transactions || []).map((tx) => ({
         ...tx,
         proofImageDataUrl: undefined,
       })),
-      expectedItems: (enrichedVault.expectedItems || []).map((item) => ({
+      expectedItems: (vault.expectedItems || []).map((item) => ({
         ...item,
         proofImageDataUrl: undefined,
       })),

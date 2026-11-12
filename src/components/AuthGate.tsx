@@ -124,9 +124,6 @@ export const AuthGate: React.FC<AuthGateProps> = ({
 
   useEffect(() => {
     setMode(initialMode);
-    setUsername('');
-    setPassword('');
-    setPinInput('');
     setShowLoginPassword(false);
     setShowRegPassword(false);
     setShowRegConfirmPassword(false);
@@ -877,33 +874,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                   </button>
                 </div>
 
-                <form
-                  onSubmit={handleLoginSubmit}
-                  className="space-y-4"
-                  autoComplete="off"
-                  data-form-type="other"
-                >
-                  {/* Hidden decoy inputs to trap browser password manager autofill and stop saved credential suggestion popups */}
-                  <div
-                    aria-hidden="true"
-                    className="sr-only pointer-events-none h-0 overflow-hidden"
-                  >
-                    <input
-                      type="text"
-                      name="decoy_autofill_trap_user"
-                      tabIndex={-1}
-                      autoComplete="username"
-                      defaultValue=""
-                    />
-                    <input
-                      type="password"
-                      name="decoy_autofill_trap_pass"
-                      tabIndex={-1}
-                      autoComplete="current-password"
-                      defaultValue=""
-                    />
-                  </div>
-
+                <form onSubmit={handleLoginSubmit} className="space-y-4" autoComplete="off">
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label
@@ -936,22 +907,12 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                     </div>
                     <input
                       id="login-username"
-                      name="vault_manual_id_entry"
                       type="text"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       placeholder="Enter your username"
                       required
                       disabled={isCooldownActive || isPermanentlyLocked}
-                      autoComplete="off"
-                      autoCorrect="off"
-                      autoCapitalize="none"
-                      spellCheck={false}
-                      aria-autocomplete="none"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
                       className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                   </div>
@@ -976,7 +937,6 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                       <div className="relative">
                         <input
                           id="login-password"
-                          name="vault_manual_secret_entry"
                           type={showLoginPassword ? 'text' : 'password'}
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
@@ -989,15 +949,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                           }
                           required
                           disabled={isCooldownActive || isPermanentlyLocked}
-                          autoComplete="new-password"
-                          autoCorrect="off"
-                          autoCapitalize="none"
-                          spellCheck={false}
-                          aria-autocomplete="none"
-                          data-lpignore="true"
-                          data-1p-ignore="true"
-                          data-bwignore="true"
-                          data-form-type="other"
+                          autoComplete="off"
                           className="w-full pl-3.5 pr-10 py-2.5 text-sm rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
                         />
                         <button
@@ -1034,7 +986,6 @@ export const AuthGate: React.FC<AuthGateProps> = ({
 
                       <input
                         id="login-mobile-pin"
-                        name="vault_manual_pin_entry"
                         ref={pinInputRef}
                         type="password"
                         inputMode="numeric"
@@ -1045,10 +996,6 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                         placeholder="••••"
                         required
                         disabled={isPinDisabledForUser || isCooldownActive || isPermanentlyLocked}
-                        autoComplete="new-password"
-                        data-lpignore="true"
-                        data-1p-ignore="true"
-                        data-form-type="other"
                         className="w-full px-4 py-2.5 text-center text-lg tracking-[0.5em] font-mono tabular-nums font-extrabold rounded-lg border border-emerald-500/50 bg-white dark:bg-slate-900 text-slate-900 dark:text-white disabled:opacity-50"
                       />
 

@@ -250,28 +250,14 @@ export function loadUsersFromLocal(): UserAccount[] {
     passwordHash: hashSecretIrreversibly('admin'), // irreversible salted SHA-256 hash
     role: 'admin',
     email: DEFAULT_PRIMARY_ADMIN_EMAIL,
-    createdAt: '1970-01-01T00:00:00.000Z',
-    updatedAt: '1970-01-01T00:00:00.000Z',
+    createdAt: '2026-11-01T00:00:00.000Z',
+    updatedAt: '2026-11-01T00:00:00.000Z',
     currency: '₹',
     customCategories: [],
   };
 
+  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify([defaultAdmin]));
   return [defaultAdmin];
-}
-
-export function hasVaultContent(vault?: UserVaultData | null): boolean {
-  if (!vault) return false;
-  return (
-    (vault.accounts?.length || 0) > 0 ||
-    (vault.transactions?.length || 0) > 0 ||
-    (vault.people?.length || 0) > 0 ||
-    (vault.expectedItems?.length || 0) > 0 ||
-    (vault.dreamVaults?.length || 0) > 0 ||
-    (vault.loans?.length || 0) > 0 ||
-    (vault.recurringPayments?.length || 0) > 0 ||
-    (vault.personRecordGroups?.length || 0) > 0 ||
-    (vault.recycleBin?.length || 0) > 0
-  );
 }
 
 export function saveUsersToLocal(users: UserAccount[], markLocalChange = true): void {
@@ -377,9 +363,6 @@ export function loadUserVault(userId: string, _seedDemoIfEmpty = false): UserVau
       if (!parsed.nextRecordNumber || parsed.nextRecordNumber < 100) {
         parsed.nextRecordNumber = 100;
       }
-      if (!hasVaultContent(parsed)) {
-        parsed.updatedAt = '1970-01-01T00:00:00.000Z';
-      }
       return parsed;
     }
   } catch {
@@ -388,7 +371,7 @@ export function loadUserVault(userId: string, _seedDemoIfEmpty = false): UserVau
 
   const emptyVault: UserVaultData = {
     userId,
-    updatedAt: '1970-01-01T00:00:00.000Z',
+    updatedAt: new Date().toISOString(),
     nextRecordNumber: 100,
     accounts: [],
     transactions: [],
@@ -399,6 +382,11 @@ export function loadUserVault(userId: string, _seedDemoIfEmpty = false): UserVau
     loans: [],
     recycleBin: [],
   };
+  try {
+    localStorage.setItem(key, JSON.stringify(emptyVault));
+  } catch {
+    // ignore
+  }
   return emptyVault;
 }
 
