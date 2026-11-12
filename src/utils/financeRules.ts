@@ -18,7 +18,14 @@ import {
 export const DEFAULT_CATEGORIES: Record<string, string[]> = {
   income: ['Salary & Payroll', 'Freelance & Consulting', 'Dividends & Returns', 'Rental Income', 'Gift Received', 'Refund / Cashback', 'Other'],
   expense: ['Groceries & Dining', 'Housing & Rent', 'Utilities & Bills', 'Transportation & Fuel', 'Healthcare', 'Shopping & Electronics', 'Subscriptions', 'Entertainment', 'Education', 'Other'],
-  transfer: ['Internal Account Transfer', 'Credit Card Settlement', 'Cash Withdrawal', 'Other'],
+  transfer: [
+    'Internal Account Transfer',
+    'Siding for Investment',
+    'External Bank Transfer',
+    'Credit Card Settlement',
+    'Cash Withdrawal',
+    'Other',
+  ],
   dream_investment: ['Index Funds & ETFs', 'Dream Home Corpus', 'Retirement Vault', 'High-Yield Fixed Deposit', 'Gold / Sovereign Bonds', 'Startup / Angel Capital', 'Other'],
   lending_out: ['Personal Loan to Friend', 'Family Assistance', 'Short-term Advance', 'Business Credit Extended', 'Other'],
   borrowing_in: ['Personal Borrowing', 'Short-term Credit', 'Family Loan Received', 'Other'],

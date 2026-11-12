@@ -77,7 +77,9 @@ interface TransactionModalProps {
 }
 
 type PrimaryFlowMode = 'expense' | 'income' | 'transfer';
-type TransferSubMode = 'self_transfer' | 'investment' | 'emi_paid';
+type TransferSubMode = 'self_transfer' | 'external_transfer' | 'emi_paid';
+type SelfTransferPurpose = 'bank_to_bank' | 'siding_for_investment';
+type ExternalTransferDirection = 'outward' | 'inward';
 
 export const TransactionModal: React.FC<TransactionModalProps> = ({
   isOpen,
@@ -100,6 +102,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   // Strictly 3 Primary Flow Options: 'expense' | 'income' | 'transfer'
   const [primaryFlow, setPrimaryFlow] = useState<PrimaryFlowMode>('expense');
   const [transferSubMode, setTransferSubMode] = useState<TransferSubMode>('self_transfer');
+  const [selfTransferPurpose, setSelfTransferPurpose] =
+    useState<SelfTransferPurpose>('bank_to_bank');
+  const [externalDirection, setExternalDirection] =
+    useState<ExternalTransferDirection>('outward');
+  const [externalRecipient, setExternalRecipient] = useState<string>('');
 
   const [type, setType] = useState<TransactionType>('expense');
   const [title, setTitle] = useState('');
@@ -147,6 +154,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
   const activeUnarchivedLoans = loans.filter((l) => !l.archivedToHistory);
   const loanAccounts = accounts.filter((a) => a.type === 'Loan Account');
+  const hasExplicitCashAccount = accounts.some(
+    (a) => a.type === 'Cash Wallet' || a.name.toLowerCase().includes('cash')
+  );
+  const hasExplicitWalletAccount = accounts.some((a) => a.type === 'Digital Wallet');
 
   // Editable Dropdown Options for Category & Payment Method
   const categoryListKey = `tx_category_${primaryFlow}`;
@@ -238,17 +249,28 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       if (editingTransaction.isPaidEmi) {
         setPrimaryFlow('transfer');
         setTransferSubMode('emi_paid');
+        setSelfTransferPurpose('bank_to_bank');
         setIsPaidEmi(true);
       } else if (txType === 'dream_investment' || editingTransaction.dreamVaultId) {
         setPrimaryFlow('transfer');
-        setTransferSubMode('investment');
+        setTransferSubMode('self_transfer');
+        setSelfTransferPurpose('siding_for_investment');
         setIsPaidEmi(false);
         setSelectedDreamVaultId(
           editingTransaction.dreamVaultId || dreamVaults[0]?.id || ''
         );
+      } else if (
+        editingTransaction.customTypeLabel?.startsWith('External Transfer') ||
+        editingTransaction.category === 'External Bank Transfer'
+      ) {
+        setPrimaryFlow('transfer');
+        setTransferSubMode('external_transfer');
+        setExternalDirection(txType === 'income' ? 'inward' : 'outward');
+        setIsPaidEmi(false);
       } else if (txType === 'transfer') {
         setPrimaryFlow('transfer');
         setTransferSubMode('self_transfer');
+        setSelfTransferPurpose('bank_to_bank');
         setIsPaidEmi(false);
       } else if (
         txType === 'income' ||
@@ -273,7 +295,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setCategory(editingTransaction.category);
       setCustomCategory(editingTransaction.customCategory || '');
       setAccountId(editingTransaction.accountId || accounts[0]?.id || '');
-      setToAccountId(editingTransaction.toAccountId || accounts[1]?.id || accounts[0]?.id || '');
+      setToAccountId(
+        editingTransaction.toAccountId ||
+          (txType === 'dream_investment'
+            ? editingTransaction.accountId || accounts[0]?.id || ''
+            : accounts[1]?.id || accounts[0]?.id || '')
+      );
       setPaymentMethod(editingTransaction.paymentMethod || PAYMENT_METHODS[0]);
       setCustomPaymentMethod(editingTransaction.customPaymentMethod || '');
       setIsRegularMonthly(Boolean(editingTransaction.isRegularMonthly));
@@ -298,20 +325,25 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setFundingBankAccountId(editingTransaction.accountId || accounts[0]?.id || 'CASH_DIRECT');
       setEmiPaymentDate(editingTransaction.date || new Date().toISOString().slice(0, 10));
       setMarkAsPaidInLoanSection(true);
+      setExternalRecipient('');
       setError('');
     } else if (isOpen && !editingTransaction) {
       const todayIso = new Date().toISOString().slice(0, 10);
       if (initialIsPaidEmi) {
         setPrimaryFlow('transfer');
         setTransferSubMode('emi_paid');
+        setSelfTransferPurpose('bank_to_bank');
         setType('expense');
         setIsPaidEmi(true);
       } else {
         setPrimaryFlow('expense');
         setTransferSubMode('self_transfer');
+        setSelfTransferPurpose('bank_to_bank');
         setType('expense');
         setIsPaidEmi(false);
       }
+      setExternalDirection('outward');
+      setExternalRecipient('');
       setTitle('');
       setAmount('');
       setDate(todayIso);
@@ -348,6 +380,74 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     ? 'bg-rose-600 hover:bg-rose-500 text-white'
     : 'bg-emerald-600 hover:bg-emerald-500 text-white';
 
+  const handleDreamVaultSelectChange = (chosenVaultId: string) => {
+    setSelectedDreamVaultId(chosenVaultId);
+    const chosenVault = dreamVaults.find((v) => v.id === chosenVaultId);
+    if (chosenVault) {
+      const isInv = isPureInvestmentVault(chosenVault);
+      if (
+        !title.trim() ||
+        title === 'Self Account Transfer' ||
+        title.startsWith('Paid EMI:') ||
+        title.startsWith('External Transfer') ||
+        title.startsWith('Investment:') ||
+        title.startsWith('Dream Allocation:')
+      ) {
+        setTitle(
+          isInv
+            ? `Investment: ${chosenVault.name}`
+            : `Dream Allocation: ${chosenVault.name}`
+        );
+      }
+      if (chosenVault.savedInAccountId) {
+        setToAccountId(chosenVault.savedInAccountId);
+      } else if (chosenVault.linkedAccountId) {
+        setToAccountId(chosenVault.linkedAccountId);
+      }
+    }
+  };
+
+  const handleSelfTransferPurposeSelect = (purpose: SelfTransferPurpose) => {
+    setSelfTransferPurpose(purpose);
+    setError('');
+    if (purpose === 'bank_to_bank') {
+      setType('transfer');
+      setIsPaidEmi(false);
+      setCategory('Internal Account Transfer');
+      if (accountId === toAccountId && accounts.length > 1) {
+        const alternate = accounts.find((a) => a.id !== accountId);
+        if (alternate) setToAccountId(alternate.id);
+      }
+      if (
+        !title.trim() ||
+        title.startsWith('Paid EMI:') ||
+        title.startsWith('External Transfer') ||
+        title.startsWith('Investment:') ||
+        title.startsWith('Dream Allocation:')
+      ) {
+        setTitle('Self Account Transfer');
+      }
+    } else {
+      setType('dream_investment');
+      setIsPaidEmi(false);
+      setCategory('Siding for Investment');
+      const targetId = selectedDreamVaultId || dreamVaults[0]?.id || '';
+      if (targetId) {
+        handleDreamVaultSelectChange(targetId);
+      } else if (
+        !title.trim() ||
+        title === 'Self Account Transfer' ||
+        title.startsWith('Paid EMI:') ||
+        title.startsWith('External Transfer')
+      ) {
+        setTitle('Investment Allocation');
+      }
+      if (!toAccountId) {
+        setToAccountId(accountId || accounts[0]?.id || '');
+      }
+    }
+  };
+
   const handlePrimaryFlowSelect = (flow: PrimaryFlowMode) => {
     setPrimaryFlow(flow);
     setSelectedRecurringId('');
@@ -367,41 +467,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         setType('expense');
         setIsPaidEmi(true);
         setCategory('Utilities & Bills');
-      } else if (transferSubMode === 'investment') {
-        setType('dream_investment');
+      } else if (transferSubMode === 'external_transfer') {
+        setType(externalDirection === 'inward' ? 'income' : 'expense');
         setIsPaidEmi(false);
-        setCategory(DEFAULT_CATEGORIES.transfer[0]);
-        if (!selectedDreamVaultId && dreamVaults.length > 0) {
-          setSelectedDreamVaultId(dreamVaults[0].id);
-        }
+        setCategory('External Bank Transfer');
       } else {
-        setType('transfer');
-        setIsPaidEmi(false);
-        setCategory(DEFAULT_CATEGORIES.transfer[0]);
-      }
-    }
-  };
-
-  const handleDreamVaultSelectChange = (chosenVaultId: string) => {
-    setSelectedDreamVaultId(chosenVaultId);
-    const chosenVault = dreamVaults.find((v) => v.id === chosenVaultId);
-    if (chosenVault) {
-      const isInv = isPureInvestmentVault(chosenVault);
-      if (
-        !title.trim() ||
-        title === 'Self Account Transfer' ||
-        title.startsWith('Paid EMI:') ||
-        title.startsWith('Investment:') ||
-        title.startsWith('Dream Allocation:')
-      ) {
-        setTitle(
-          isInv
-            ? `Investment: ${chosenVault.name}`
-            : `Dream Allocation: ${chosenVault.name}`
-        );
-      }
-      if (chosenVault.linkedAccountId) {
-        setAccountId(chosenVault.linkedAccountId);
+        handleSelfTransferPurposeSelect(selfTransferPurpose);
       }
     }
   };
@@ -410,26 +481,23 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     setTransferSubMode(sub);
     setError('');
     if (sub === 'self_transfer') {
-      setType('transfer');
+      handleSelfTransferPurposeSelect(selfTransferPurpose);
+    } else if (sub === 'external_transfer') {
+      setType(externalDirection === 'inward' ? 'income' : 'expense');
       setIsPaidEmi(false);
-      setCategory(DEFAULT_CATEGORIES.transfer[0]);
+      setCategory('External Bank Transfer');
       if (
         !title.trim() ||
+        title === 'Self Account Transfer' ||
         title.startsWith('Paid EMI:') ||
         title.startsWith('Investment:') ||
         title.startsWith('Dream Allocation:')
       ) {
-        setTitle('Self Account Transfer');
-      }
-    } else if (sub === 'investment') {
-      setType('dream_investment');
-      setIsPaidEmi(false);
-      setCategory(DEFAULT_CATEGORIES.transfer[0]);
-      const targetId = selectedDreamVaultId || dreamVaults[0]?.id || '';
-      if (targetId) {
-        handleDreamVaultSelectChange(targetId);
-      } else if (!title.trim() || title === 'Self Account Transfer' || title.startsWith('Paid EMI:')) {
-        setTitle('Investment Allocation');
+        setTitle(
+          externalRecipient.trim()
+            ? `External Transfer: ${externalRecipient.trim()}`
+            : 'External Bank Transfer'
+        );
       }
     } else {
       setType('expense');
@@ -500,12 +568,21 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const isEmiPaidFlowActive =
     primaryFlow === 'transfer' && transferSubMode === 'emi_paid';
 
-  const isInvestmentTransferActive =
-    primaryFlow === 'transfer' && transferSubMode === 'investment';
+  const isExternalTransferActive =
+    primaryFlow === 'transfer' && transferSubMode === 'external_transfer';
 
-  const isSameSelfTransferAccount =
+  const isInvestmentTransferActive =
     primaryFlow === 'transfer' &&
     transferSubMode === 'self_transfer' &&
+    selfTransferPurpose === 'siding_for_investment';
+
+  const isBankToBankSelfTransferActive =
+    primaryFlow === 'transfer' &&
+    transferSubMode === 'self_transfer' &&
+    selfTransferPurpose === 'bank_to_bank';
+
+  const isSameSelfTransferAccount =
+    isBankToBankSelfTransferActive &&
     Boolean(accountId) &&
     accountId === toAccountId;
 
@@ -516,6 +593,53 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const grossNumeric = Math.max(0, Number(amount) || 0);
   const splitNumeric = isSplit ? Math.max(0, Number(splitAmount) || 0) : 0;
   const netExpenseNumeric = Math.max(0, Math.round((grossNumeric - splitNumeric) * 100) / 100);
+
+  const renderAccountSelectOptions = () => (
+    <>
+      {accounts.some((a) => a.type === 'Bank Account' || a.type === 'Credit Card') && (
+        <optgroup label="Bank Accounts">
+          {accounts
+            .filter((a) => a.type === 'Bank Account' || a.type === 'Credit Card')
+            .map((acc) => (
+              <option key={acc.id} value={acc.id}>
+                {acc.name} ({acc.type})
+              </option>
+            ))}
+        </optgroup>
+      )}
+      {accounts.some((a) => a.type === 'Loan Account') && (
+        <optgroup label="Loan Accounts">
+          {accounts
+            .filter((a) => a.type === 'Loan Account')
+            .map((acc) => (
+              <option key={acc.id} value={acc.id}>
+                {acc.name} (Loan Account)
+              </option>
+            ))}
+        </optgroup>
+      )}
+      <optgroup label="Wallets & Cash">
+        {accounts
+          .filter(
+            (a) =>
+              a.type !== 'Bank Account' &&
+              a.type !== 'Credit Card' &&
+              a.type !== 'Loan Account'
+          )
+          .map((acc) => (
+            <option key={acc.id} value={acc.id}>
+              {acc.name} ({acc.type})
+            </option>
+          ))}
+        {!hasExplicitWalletAccount && (
+          <option value="WALLET_DIRECT">Digital Wallet (UPI / Wallet)</option>
+        )}
+        {!hasExplicitCashAccount && (
+          <option value="CASH_DIRECT">Physical Cash (Hand Cash)</option>
+        )}
+      </optgroup>
+    </>
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -534,7 +658,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       return;
     }
 
-    if (primaryFlow === 'transfer' && transferSubMode === 'self_transfer') {
+    if (isBankToBankSelfTransferActive) {
       if (accountId === toAccountId) {
         setError('Same account selected — transfer between identical accounts is not possible.');
         return;
@@ -606,8 +730,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     const effectiveDate = isEmiPaidFlowActive ? emiPaymentDate || date : date;
     const effectiveType: TransactionType = isInvestmentTransferActive
       ? 'dream_investment'
-      : primaryFlow === 'transfer' && transferSubMode === 'self_transfer'
+      : isBankToBankSelfTransferActive
       ? 'transfer'
+      : isExternalTransferActive
+      ? externalDirection === 'inward'
+        ? 'income'
+        : 'expense'
       : isEmiPaidFlowActive
       ? 'expense'
       : primaryFlow === 'income'
@@ -622,12 +750,17 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       title: title.trim(),
       amount: finalRecordAmount,
       type: effectiveType,
+      customTypeLabel: isExternalTransferActive
+        ? externalDirection === 'inward'
+          ? 'External Transfer (Inward)'
+          : 'External Transfer (Outward)'
+        : undefined,
       category,
       customCategory: category === 'Other' ? customCategory.trim() : undefined,
       accountId: effectiveAccountId,
       toAccountId:
-        primaryFlow === 'transfer' && transferSubMode === 'self_transfer'
-          ? toAccountId
+        isBankToBankSelfTransferActive || isInvestmentTransferActive
+          ? toAccountId || effectiveAccountId
           : undefined,
       dreamVaultId: isInvestmentTransferActive ? selectedDreamVaultId : undefined,
       paymentMethod:
@@ -746,7 +879,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               <div className="space-y-1.5">
                 <span className="flex items-center text-xs font-bold text-slate-700 dark:text-slate-300">
                   <span>Flow Type</span>
-                  <InfoTip text="Choose Expense, Income, or Transfer (Self Transfer / Investment / EMI Paid)." />
+                  <InfoTip text="Choose Expense, Income, or Transfer (Self Transfer / External Transfer / EMI Paid)." />
                 </span>
 
                 <div
@@ -797,7 +930,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 </div>
               </div>
 
-              {/* IF TRANSFER SELECTED: Sub-Option Selector -> "Self Transfer", "Investment", OR "EMI Paid" */}
+              {/* IF TRANSFER SELECTED: Strictly 3 Sub-Options -> "Self Transfer", "External Transfer", OR "EMI Paid" */}
               {primaryFlow === 'transfer' && (
                 <div
                   data-testid="transfer-sub-option-selector"
@@ -806,7 +939,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-extrabold text-indigo-900 dark:text-indigo-200 flex items-center">
                       <span>Transfer Mode</span>
-                      <InfoTip text="Move funds between your own accounts (Self Transfer), allocate to an Investment or Dream card (Investment), or record a loan EMI payment." />
+                      <InfoTip text="Choose Self Transfer (Bank to Bank or Siding for Investment), External Transfer (to/from a third-party bank account), or EMI Paid." />
                     </span>
                     <div className="grid grid-cols-3 gap-2 w-full sm:w-auto">
                       <button
@@ -825,16 +958,16 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
                       <button
                         type="button"
-                        data-testid="transfer-sub-investment-btn"
-                        onClick={() => handleTransferSubModeSelect('investment')}
+                        data-testid="transfer-sub-external-btn"
+                        onClick={() => handleTransferSubModeSelect('external_transfer')}
                         className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border flex items-center justify-center gap-1.5 cursor-pointer ${
-                          transferSubMode === 'investment'
-                            ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
-                            : 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 border-amber-500/40'
+                          transferSubMode === 'external_transfer'
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
                         }`}
                       >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>Investment</span>
+                        <TrendingUp className="w-3.5 h-3.5" />
+                        <span>External Transfer</span>
                       </button>
 
                       <button
@@ -853,186 +986,333 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Sub-Option A: Self Transfer -> From Which Account to Which Account (or Investment) */}
+                  {/* Sub-Option 1: Self Transfer -> Ask "For What?" FIRST: Bank to Bank OR Siding for Investment */}
                   {transferSubMode === 'self_transfer' && (
                     <div
                       data-testid="self-transfer-accounts-box"
-                      className="space-y-2.5 p-3 rounded-xl bg-white dark:bg-slate-900 border border-indigo-500/30"
+                      className="space-y-3 p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-500/30"
                     >
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                            From Account
-                          </label>
-                          <select
-                            data-testid="transfer-from-account-select"
-                            value={accountId}
-                            onChange={(e) => setAccountId(e.target.value)}
-                            className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+                      {/* Step 1 inside Self Transfer: For What? */}
+                      <div className="space-y-1.5 pb-2.5 border-b border-slate-200 dark:border-slate-800">
+                        <label className="block text-xs font-extrabold text-slate-800 dark:text-slate-200">
+                          For What? (Select Purpose)
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            data-testid="self-transfer-purpose-bank-btn"
+                            onClick={() => handleSelfTransferPurposeSelect('bank_to_bank')}
+                            className={`px-3 py-2 rounded-lg text-xs font-extrabold border flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                              selfTransferPurpose === 'bank_to_bank'
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-indigo-500/50'
+                            }`}
                           >
-                            {accounts.map((acc) => (
-                              <option key={acc.id} value={acc.id}>
-                                {acc.name} ({acc.type})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                            <span>Bank to Bank</span>
+                          </button>
 
-                        <div>
-                          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                            To Account / Investment
-                          </label>
-                          <select
-                            data-testid="transfer-to-account-select"
-                            value={toAccountId}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              if (val === '__INVESTMENT_MODE__') {
-                                handleTransferSubModeSelect('investment');
-                              } else if (val.startsWith('DREAM_VAULT:')) {
-                                const dvId = val.replace('DREAM_VAULT:', '');
-                                setTransferSubMode('investment');
-                                setType('dream_investment');
-                                setIsPaidEmi(false);
-                                setCategory(DEFAULT_CATEGORIES.transfer[0]);
-                                handleDreamVaultSelectChange(dvId);
-                              } else {
-                                setToAccountId(val);
-                              }
-                            }}
-                            className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+                          <button
+                            type="button"
+                            data-testid="self-transfer-purpose-investment-btn"
+                            onClick={() =>
+                              handleSelfTransferPurposeSelect('siding_for_investment')
+                            }
+                            className={`px-3 py-2 rounded-lg text-xs font-extrabold border flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                              selfTransferPurpose === 'siding_for_investment'
+                                ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                                : 'bg-amber-50/60 dark:bg-amber-950/20 text-amber-800 dark:text-amber-300 border-amber-500/40 hover:border-amber-500'
+                            }`}
                           >
-                            <optgroup label="My Accounts & Wallets">
-                              {accounts.map((acc) => (
-                                <option key={acc.id} value={acc.id}>
-                                  {acc.name} ({acc.type})
-                                </option>
-                              ))}
-                            </optgroup>
-                            <optgroup label="Investment & Dreams">
-                              <option value="__INVESTMENT_MODE__">
-                                ★ Investment (Choose from Investments &amp; Dreams List)
-                              </option>
-                              {dreamVaults.map((dv) => (
-                                <option key={dv.id} value={`DREAM_VAULT:${dv.id}`}>
-                                  {isPureInvestmentVault(dv) ? 'Investment' : 'Dream'}: {dv.name} (Saved: {currency}
-                                  {dv.currentAmount.toLocaleString()})
-                                </option>
-                              ))}
-                            </optgroup>
-                          </select>
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>Siding for Investment</span>
+                          </button>
                         </div>
                       </div>
 
-                      {isSameSelfTransferAccount && (
+                      {/* Purpose A: Bank to Bank -> Simple From and To Account lists (Bank, Loan, Wallet, Cash) */}
+                      {selfTransferPurpose === 'bank_to_bank' && (
                         <div
-                          data-testid="self-transfer-same-account-warning"
-                          className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-2"
+                          data-testid="self-transfer-bank-to-bank-fields"
+                          className="space-y-2.5"
                         >
-                          <AlertTriangle className="w-4 h-4 shrink-0" />
-                          <span>Same account selected — no transfer possible</span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                From Account (Bank / Loan / Wallet / Cash)
+                              </label>
+                              <select
+                                data-testid="transfer-from-account-select"
+                                value={accountId}
+                                onChange={(e) => setAccountId(e.target.value)}
+                                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+                              >
+                                {renderAccountSelectOptions()}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                To Account (Bank / Loan / Wallet / Cash)
+                              </label>
+                              <select
+                                data-testid="transfer-to-account-select"
+                                value={toAccountId}
+                                onChange={(e) => setToAccountId(e.target.value)}
+                                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+                              >
+                                {renderAccountSelectOptions()}
+                              </select>
+                            </div>
+                          </div>
+
+                          {isSameSelfTransferAccount && (
+                            <div
+                              data-testid="self-transfer-same-account-warning"
+                              className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-2"
+                            >
+                              <AlertTriangle className="w-4 h-4 shrink-0" />
+                              <span>Same account selected — no transfer possible</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Purpose B: Siding for Investment -> 1. From Bank, 2. To Bank, 3. Investments & Dreams List */}
+                      {selfTransferPurpose === 'siding_for_investment' && (
+                        <div
+                          data-testid="transfer-investment-box"
+                          className="space-y-3 p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-500/40"
+                        >
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                1. From Bank / Account (Debit From)
+                              </label>
+                              <select
+                                data-testid="transfer-investment-from-account-select"
+                                value={accountId}
+                                onChange={(e) => setAccountId(e.target.value)}
+                                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+                              >
+                                {renderAccountSelectOptions()}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                                2. To Bank / Account (Hold / Deposit In)
+                              </label>
+                              <select
+                                data-testid="transfer-investment-to-account-select"
+                                value={toAccountId || accountId}
+                                onChange={(e) => setToAccountId(e.target.value)}
+                                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+                              >
+                                {renderAccountSelectOptions()}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-bold text-amber-900 dark:text-amber-200 mb-1">
+                              3. Select Investment or Dream
+                            </label>
+                            <select
+                              data-testid="transfer-investment-vault-select"
+                              value={selectedDreamVaultId}
+                              onChange={(e) => handleDreamVaultSelectChange(e.target.value)}
+                              className="w-full px-3 py-2 text-xs font-bold rounded-lg border border-amber-500/50 bg-white dark:bg-slate-950 text-slate-900 dark:text-white"
+                            >
+                              {dreamVaults.length === 0 ? (
+                                <option value="">-- No Investment or Dream Cards Found --</option>
+                              ) : (
+                                <>
+                                  <option value="">-- Select Investment or Dream Card --</option>
+                                  {dreamVaults.some((d) => isPureInvestmentVault(d)) && (
+                                    <optgroup label="Investments (FD, Gold, Mutual Funds)">
+                                      {dreamVaults
+                                        .filter((d) => isPureInvestmentVault(d))
+                                        .map((dv) => (
+                                          <option key={dv.id} value={dv.id}>
+                                            {dv.name} ({dv.storageType}) — Saved: {currency}
+                                            {dv.currentAmount.toLocaleString()}
+                                          </option>
+                                        ))}
+                                    </optgroup>
+                                  )}
+                                  {dreamVaults.some((d) => !isPureInvestmentVault(d)) && (
+                                    <optgroup label="Dreams & Goals (Laptop, Emergency, Goals)">
+                                      {dreamVaults
+                                        .filter((d) => !isPureInvestmentVault(d))
+                                        .map((dv) => (
+                                          <option key={dv.id} value={dv.id}>
+                                            {dv.name} ({dv.storageType}) — Saved: {currency}
+                                            {dv.currentAmount.toLocaleString()} / Target:{' '}
+                                            {currency}
+                                            {dv.targetAmount.toLocaleString()}
+                                          </option>
+                                        ))}
+                                    </optgroup>
+                                  )}
+                                </>
+                              )}
+                            </select>
+                          </div>
+
+                          {selectedDreamVaultObj && (
+                            <div
+                              data-testid="transfer-investment-preview"
+                              className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-amber-500/30 flex flex-wrap items-center justify-between gap-2 text-xs"
+                            >
+                              <div>
+                                <span className="font-extrabold text-amber-800 dark:text-amber-300">
+                                  {selectedDreamVaultObj.name}
+                                </span>
+                                <span className="ml-1.5 text-[11px] text-slate-500">
+                                  (
+                                  {isPureInvestmentVault(selectedDreamVaultObj)
+                                    ? 'Investment'
+                                    : 'Dream'}{' '}
+                                  · {selectedDreamVaultObj.storageType})
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3 font-mono text-[11px]">
+                                <span className="text-slate-600 dark:text-slate-400">
+                                  Current:{' '}
+                                  <strong>
+                                    {currency}
+                                    {selectedDreamVaultObj.currentAmount.toLocaleString()}
+                                  </strong>
+                                </span>
+                                {grossNumeric > 0 && (
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                                    New Total: {currency}
+                                    {(
+                                      selectedDreamVaultObj.currentAmount + grossNumeric
+                                    ).toLocaleString()}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
                   )}
 
-                  {/* Sub-Option B: Investment -> Select From Account & Investment / Dream Card */}
-                  {transferSubMode === 'investment' && (
+                  {/* Sub-Option 2: External Transfer -> Third-Party / Beneficiary Bank Transfer */}
+                  {transferSubMode === 'external_transfer' && (
                     <div
-                      data-testid="transfer-investment-box"
-                      className="space-y-3 p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-500/40"
+                      data-testid="external-transfer-box"
+                      className="space-y-3 p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-500/30"
                     >
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          data-testid="external-transfer-outward-btn"
+                          onClick={() => {
+                            setExternalDirection('outward');
+                            setType('expense');
+                            if (
+                              !title.trim() ||
+                              title.startsWith('External Transfer')
+                            ) {
+                              setTitle(
+                                externalRecipient.trim()
+                                  ? `External Transfer to ${externalRecipient.trim()}`
+                                  : 'External Bank Transfer'
+                              );
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border flex items-center justify-center gap-1.5 cursor-pointer ${
+                            externalDirection === 'outward'
+                              ? 'bg-rose-600 text-white border-rose-600'
+                              : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+                          }`}
+                        >
+                          <TrendingDown className="w-3.5 h-3.5" />
+                          <span>Send Outward (Debit)</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          data-testid="external-transfer-inward-btn"
+                          onClick={() => {
+                            setExternalDirection('inward');
+                            setType('income');
+                            if (
+                              !title.trim() ||
+                              title.startsWith('External Transfer')
+                            ) {
+                              setTitle(
+                                externalRecipient.trim()
+                                  ? `External Transfer from ${externalRecipient.trim()}`
+                                  : 'External Bank Transfer Received'
+                              );
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border flex items-center justify-center gap-1.5 cursor-pointer ${
+                            externalDirection === 'inward'
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+                          }`}
+                        >
+                          <TrendingUp className="w-3.5 h-3.5" />
+                          <span>Receive Inward (Credit)</span>
+                        </button>
+                      </div>
+
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
                           <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                            From Account (Debit From)
+                            {externalDirection === 'inward'
+                              ? 'Credit To My Account'
+                              : 'Debit From My Account'}
                           </label>
                           <select
-                            data-testid="transfer-investment-from-account-select"
+                            data-testid="external-transfer-account-select"
                             value={accountId}
                             onChange={(e) => setAccountId(e.target.value)}
                             className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
                           >
-                            {accounts.map((acc) => (
-                              <option key={acc.id} value={acc.id}>
-                                {acc.name} ({acc.type})
-                              </option>
-                            ))}
+                            {renderAccountSelectOptions()}
                           </select>
                         </div>
 
                         <div>
-                          <label className="block text-xs font-bold text-amber-900 dark:text-amber-200 mb-1">
-                            Investment &amp; Dreams List
+                          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                            External Beneficiary / Bank Name
                           </label>
-                          <select
-                            data-testid="transfer-investment-vault-select"
-                            value={selectedDreamVaultId}
-                            onChange={(e) => handleDreamVaultSelectChange(e.target.value)}
-                            className="w-full px-3 py-2 text-xs font-bold rounded-lg border border-amber-500/50 bg-white dark:bg-slate-950 text-slate-900 dark:text-white"
-                          >
-                            {dreamVaults.length === 0 ? (
-                              <option value="">-- No Investment or Dream Cards Found --</option>
-                            ) : (
-                              <>
-                                <option value="">-- Select Investment or Dream Card --</option>
-                                {dreamVaults.some((d) => isPureInvestmentVault(d)) && (
-                                  <optgroup label="Investments (FD, Gold, Mutual Funds)">
-                                    {dreamVaults
-                                      .filter((d) => isPureInvestmentVault(d))
-                                      .map((dv) => (
-                                        <option key={dv.id} value={dv.id}>
-                                          {dv.name} ({dv.storageType}) — Saved: {currency}
-                                          {dv.currentAmount.toLocaleString()}
-                                        </option>
-                                      ))}
-                                  </optgroup>
-                                )}
-                                {dreamVaults.some((d) => !isPureInvestmentVault(d)) && (
-                                  <optgroup label="Dreams & Goals (Laptop, Emergency, Goals)">
-                                    {dreamVaults
-                                      .filter((d) => !isPureInvestmentVault(d))
-                                      .map((dv) => (
-                                        <option key={dv.id} value={dv.id}>
-                                          {dv.name} ({dv.storageType}) — Saved: {currency}
-                                          {dv.currentAmount.toLocaleString()} / Target: {currency}
-                                          {dv.targetAmount.toLocaleString()}
-                                        </option>
-                                      ))}
-                                  </optgroup>
-                                )}
-                              </>
-                            )}
-                          </select>
+                          <input
+                            type="text"
+                            data-testid="external-transfer-recipient-input"
+                            value={externalRecipient}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setExternalRecipient(val);
+                              if (
+                                !title.trim() ||
+                                title === 'External Bank Transfer' ||
+                                title === 'External Bank Transfer Received' ||
+                                title.startsWith('External Transfer')
+                              ) {
+                                setTitle(
+                                  val.trim()
+                                    ? externalDirection === 'inward'
+                                      ? `External Transfer from ${val.trim()}`
+                                      : `External Transfer to ${val.trim()}`
+                                    : externalDirection === 'inward'
+                                    ? 'External Bank Transfer Received'
+                                    : 'External Bank Transfer'
+                                );
+                              }
+                            }}
+                            placeholder="e.g. Beneficiary Name / External Bank"
+                            className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white"
+                          />
                         </div>
                       </div>
-
-                      {selectedDreamVaultObj && (
-                        <div
-                          data-testid="transfer-investment-preview"
-                          className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-amber-500/30 flex flex-wrap items-center justify-between gap-2 text-xs"
-                        >
-                          <div>
-                            <span className="font-extrabold text-amber-800 dark:text-amber-300">
-                              {selectedDreamVaultObj.name}
-                            </span>
-                            <span className="ml-1.5 text-[11px] text-slate-500">
-                              ({isPureInvestmentVault(selectedDreamVaultObj) ? 'Investment' : 'Dream'} · {selectedDreamVaultObj.storageType})
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3 font-mono text-[11px]">
-                            <span className="text-slate-600 dark:text-slate-400">
-                              Current: <strong>{currency}{selectedDreamVaultObj.currentAmount.toLocaleString()}</strong>
-                            </span>
-                            {grossNumeric > 0 && (
-                              <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                                New Total: {currency}
-                                {(selectedDreamVaultObj.currentAmount + grossNumeric).toLocaleString()}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>

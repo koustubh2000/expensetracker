@@ -1293,7 +1293,16 @@ export default function App() {
 
     const updatedDreams = vault.dreamVaults.map((dv) => {
       if (txInput.type === 'dream_investment' && txInput.dreamVaultId === dv.id) {
-        return { ...dv, currentAmount: dv.currentAmount + txInput.amount };
+        return {
+          ...dv,
+          currentAmount: dv.currentAmount + txInput.amount,
+          savedInAccountId:
+            txInput.toAccountId &&
+            txInput.toAccountId !== 'CASH_DIRECT' &&
+            txInput.toAccountId !== 'WALLET_DIRECT'
+              ? txInput.toAccountId
+              : dv.savedInAccountId,
+        };
       }
       return dv;
     });
@@ -5166,11 +5175,25 @@ export default function App() {
                               </td>
                               <td className="py-3 px-3 whitespace-normal break-words">
                                 <div className="text-slate-800 dark:text-slate-200 font-medium">
-                                  {acc?.name || 'Primary Wallet'}
+                                  {acc?.name ||
+                                    (tx.accountId === 'CASH_DIRECT'
+                                      ? 'Physical Cash'
+                                      : tx.accountId === 'WALLET_DIRECT'
+                                      ? 'Digital Wallet'
+                                      : 'Primary Wallet')}
                                   {toAcc
                                     ? ` → ${toAcc.name}`
-                                    : linkedDreamVault
-                                    ? ` → ${linkedDreamVault.name}`
+                                    : tx.toAccountId === 'CASH_DIRECT'
+                                    ? ' → Physical Cash'
+                                    : tx.toAccountId === 'WALLET_DIRECT'
+                                    ? ' → Digital Wallet'
+                                    : ''}
+                                  {linkedDreamVault
+                                    ? ` (${
+                                        isPureInvestmentVault(linkedDreamVault)
+                                          ? 'Investment'
+                                          : 'Dream'
+                                      }: ${linkedDreamVault.name})`
                                     : ''}
                                 </div>
                                 <div className="text-[11px] text-slate-500">{methodLabel}</div>

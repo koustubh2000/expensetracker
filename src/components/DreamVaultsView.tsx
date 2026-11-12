@@ -724,6 +724,23 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
                 <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                   {linkedRecords.map((tx) => {
                     const fromAcc = accounts.find((a) => a.id === tx.accountId);
+                    const toAcc = tx.toAccountId
+                      ? accounts.find((a) => a.id === tx.toAccountId)
+                      : undefined;
+                    const fromLabel =
+                      fromAcc?.name ||
+                      (tx.accountId === 'CASH_DIRECT'
+                        ? 'Physical Cash'
+                        : tx.accountId === 'WALLET_DIRECT'
+                        ? 'Digital Wallet'
+                        : 'Account');
+                    const toLabel =
+                      toAcc?.name ||
+                      (tx.toAccountId === 'CASH_DIRECT'
+                        ? 'Physical Cash'
+                        : tx.toAccountId === 'WALLET_DIRECT'
+                        ? 'Digital Wallet'
+                        : '');
                     return (
                       <div
                         key={tx.id}
@@ -735,7 +752,8 @@ export const DreamVaultsView: React.FC<DreamVaultsViewProps> = ({
                             #{tx.id} · {tx.title}
                           </div>
                           <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                            {tx.date} · From: {fromAcc?.name || 'Account'}
+                            {tx.date} · From: {fromLabel}
+                            {toLabel ? ` → To: ${toLabel}` : ''}
                           </div>
                         </div>
                         <div className="font-mono font-extrabold text-emerald-600 dark:text-emerald-400 shrink-0">
