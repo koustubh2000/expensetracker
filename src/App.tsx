@@ -298,7 +298,11 @@ export default function App() {
   const [dashboardRevealedNumbers, setDashboardRevealedNumbers] = useState<Record<string, boolean>>(
     {}
   );
-  const [dashboardTopTab, setDashboardTopTab] = useState<'savings' | 'loans'>('savings');
+  const [selectedPeoplePersonId, setSelectedPeoplePersonId] = useState<string>('');
+  const [dashboardReceivablePersonFilter, setDashboardReceivablePersonFilter] =
+    useState<string>('ALL');
+  const [dashboardPayablePersonFilter, setDashboardPayablePersonFilter] =
+    useState<string>('ALL');
   const [expandedSummaryCard, setExpandedSummaryCard] = useState<
     'totalCounted' | 'expectedIn' | 'moneyIOwe' | 'theLoans' | 'totalInvestments' | null
   >(null);
@@ -1144,55 +1148,54 @@ export default function App() {
   const handleSaveAccountFromTab = async (accountObj: WalletAccount, isEdit: boolean) => {
     if (isAccountOnHold) return;
     if (isCloudSession && firebaseUser) {
-      await saveCloudAccount(firebaseUser.uid, accountObj);
-    } else {
-      const updatedAccounts = isEdit
-        ? vault.accounts.map((a) => (a.id === accountObj.id ? accountObj : a))
-        : [...vault.accounts, accountObj];
-
-      const updatedLoans =
-        accountObj.type === 'Loan Account'
-          ? (vault.loans || []).map((ln) => {
-              if (
-                ln.connectedLoanAccountId === accountObj.id ||
-                accountObj.connectedLoanRecordId === ln.id
-              ) {
-                return {
-                  ...ln,
-                  connectedLoanAccountId: accountObj.id,
-                  status: accountObj.loanStatus || ln.status,
-                  principalAmount:
-                    accountObj.sanctionedLoanAmount && accountObj.sanctionedLoanAmount > 0
-                      ? accountObj.sanctionedLoanAmount
-                      : ln.principalAmount,
-                  currentRemainingAmount:
-                    accountObj.currentRemainingLoanAmount !== undefined
-                      ? accountObj.currentRemainingLoanAmount
-                      : ln.currentRemainingAmount,
-                  customSuggestedEmi:
-                    accountObj.bankGivenEmi && accountObj.bankGivenEmi > 0
-                      ? accountObj.bankGivenEmi
-                      : ln.customSuggestedEmi,
-                  interestRateAnnual:
-                    accountObj.loanInterestRate !== undefined
-                      ? accountObj.loanInterestRate
-                      : ln.interestRateAnnual,
-                  tenureMonths:
-                    accountObj.loanTenureMonths && accountObj.loanTenureMonths > 0
-                      ? accountObj.loanTenureMonths
-                      : ln.tenureMonths,
-                };
-              }
-              return ln;
-            })
-          : vault.loans;
-
-      persistVaultChange({
-        ...vault,
-        accounts: updatedAccounts,
-        loans: updatedLoans,
-      });
+      void saveCloudAccount(firebaseUser.uid, accountObj);
     }
+    const updatedAccounts = isEdit
+      ? vault.accounts.map((a) => (a.id === accountObj.id ? accountObj : a))
+      : [...vault.accounts, accountObj];
+
+    const updatedLoans =
+      accountObj.type === 'Loan Account'
+        ? (vault.loans || []).map((ln) => {
+            if (
+              ln.connectedLoanAccountId === accountObj.id ||
+              accountObj.connectedLoanRecordId === ln.id
+            ) {
+              return {
+                ...ln,
+                connectedLoanAccountId: accountObj.id,
+                status: accountObj.loanStatus || ln.status,
+                principalAmount:
+                  accountObj.sanctionedLoanAmount && accountObj.sanctionedLoanAmount > 0
+                    ? accountObj.sanctionedLoanAmount
+                    : ln.principalAmount,
+                currentRemainingAmount:
+                  accountObj.currentRemainingLoanAmount !== undefined
+                    ? accountObj.currentRemainingLoanAmount
+                    : ln.currentRemainingAmount,
+                customSuggestedEmi:
+                  accountObj.bankGivenEmi && accountObj.bankGivenEmi > 0
+                    ? accountObj.bankGivenEmi
+                    : ln.customSuggestedEmi,
+                interestRateAnnual:
+                  accountObj.loanInterestRate !== undefined
+                    ? accountObj.loanInterestRate
+                    : ln.interestRateAnnual,
+                tenureMonths:
+                  accountObj.loanTenureMonths && accountObj.loanTenureMonths > 0
+                    ? accountObj.loanTenureMonths
+                    : ln.tenureMonths,
+              };
+            }
+            return ln;
+          })
+        : vault.loans;
+
+    persistVaultChange({
+      ...vault,
+      accounts: updatedAccounts,
+      loans: updatedLoans,
+    });
     triggerFeedback(
       isEdit
         ? 'Wallet / Bank Account Updated Successfully'
@@ -1206,9 +1209,7 @@ export default function App() {
     if (isAccountOnHold) return;
     const targetAcc = vault.accounts.find((a) => a.id === accountId);
     if (isCloudSession) {
-      await deleteCloudAccount(accountId);
-      triggerFeedback('Account Moved to Recycle Bin', 'success', 'toast');
-      return;
+      void deleteCloudAccount(accountId);
     }
     const nextBin = targetAcc
       ? pushToRecycleBin(vault.recycleBin, {
@@ -1355,23 +1356,13 @@ export default function App() {
     }
 
     if (isCloudSession && firebaseUser) {
-      await saveCloudTransaction(firebaseUser.uid, newTx);
+      void saveCloudTransaction(firebaseUser.uid, newTx);
       if (txInput.type === 'dream_investment' && txInput.dreamVaultId) {
         const target = vault.dreamVaults.find((d) => d.id === txInput.dreamVaultId);
         if (target) {
-          await updateCloudDreamVaultAmount(target.id, target.currentAmount + txInput.amount);
+          void updateCloudDreamVaultAmount(target.id, target.currentAmount + txInput.amount);
         }
       }
-      triggerFeedback(
-        newTx.isSplit
-          ? `Record #${newTx.id} Saved & Split Receivable Added for ${resolvedSplitPersonName}`
-          : newTx.proofImageDataUrl
-          ? `Record #${newTx.id} & HD Proof Saved`
-          : `Record #${newTx.id} Saved Successfully`,
-        'success',
-        'toast'
-      );
-      return;
     }
 
     const updatedDreams = vault.dreamVaults.map((dv) => {
@@ -1445,11 +1436,11 @@ export default function App() {
     const prevTx = vault.transactions.find((t) => t.id === updatedTx.id);
 
     if (isCloudSession && firebaseUser) {
-      await saveCloudTransaction(firebaseUser.uid, updatedTx);
+      void saveCloudTransaction(firebaseUser.uid, updatedTx);
       if (prevTx?.type === 'dream_investment' && prevTx.dreamVaultId) {
         const oldVault = vault.dreamVaults.find((d) => d.id === prevTx.dreamVaultId);
         if (oldVault) {
-          await updateCloudDreamVaultAmount(
+          void updateCloudDreamVaultAmount(
             oldVault.id,
             Math.max(0, oldVault.currentAmount - prevTx.amount)
           );
@@ -1462,12 +1453,9 @@ export default function App() {
             prevTx?.type === 'dream_investment' && prevTx.dreamVaultId === newVault.id
               ? Math.max(0, newVault.currentAmount - prevTx.amount)
               : newVault.currentAmount;
-          await updateCloudDreamVaultAmount(newVault.id, baseAmt + updatedTx.amount);
+          void updateCloudDreamVaultAmount(newVault.id, baseAmt + updatedTx.amount);
         }
       }
-      setEditingTransaction(null);
-      triggerFeedback(`Record #${updatedTx.id} Updated Successfully`, 'success', 'toast');
-      return;
     }
 
     const nextTransactions = vault.transactions.map((t) =>
@@ -1582,18 +1570,16 @@ export default function App() {
     if (isAccountOnHold) return;
     const target = vault.transactions.find((t) => t.id === id);
     if (isCloudSession) {
-      await deleteCloudTransaction(id);
+      void deleteCloudTransaction(id);
       if (target?.type === 'dream_investment' && target.dreamVaultId) {
         const linkedDv = vault.dreamVaults.find((d) => d.id === target.dreamVaultId);
         if (linkedDv) {
-          await updateCloudDreamVaultAmount(
+          void updateCloudDreamVaultAmount(
             linkedDv.id,
             Math.max(0, linkedDv.currentAmount - target.amount)
           );
         }
       }
-      triggerFeedback(`Record #${id} Moved to Recycle Bin`, 'success', 'toast');
-      return;
     }
     // Keep proof image in localVaultStorage by proofId reference so moving to Recycle Bin does not duplicate data
     const lightweightTxPayload: TransactionRecord | null = target
@@ -1638,9 +1624,7 @@ export default function App() {
   const handleSettleTransaction = async (id: string) => {
     if (isAccountOnHold) return;
     if (isCloudSession) {
-      await settleCloudTransaction(id);
-      triggerFeedback('Transaction Marked as Settled', 'success', 'toast');
-      return;
+      void settleCloudTransaction(id);
     }
     persistVaultChange({
       ...vault,
@@ -1658,13 +1642,12 @@ export default function App() {
       id: `person-${Date.now()}`,
     };
     if (isCloudSession && firebaseUser) {
-      saveCloudPerson(firebaseUser.uid, created);
-    } else {
-      persistVaultChange({
-        ...vault,
-        people: [...vault.people, created],
-      });
+      void saveCloudPerson(firebaseUser.uid, created);
     }
+    persistVaultChange({
+      ...vault,
+      people: [...vault.people, created],
+    });
     return created;
   };
 
@@ -1672,8 +1655,7 @@ export default function App() {
     if (isAccountOnHold) return;
     const targetPerson = vault.people.find((p) => p.id === personId);
     if (isCloudSession) {
-      await deleteCloudPerson(personId);
-      return;
+      void deleteCloudPerson(personId);
     }
     const nextBin = targetPerson
       ? pushToRecycleBin(vault.recycleBin, {
@@ -1720,7 +1702,7 @@ export default function App() {
     );
     const targetPerson = updatedPeople.find((p) => p.id === personId);
     if (isCloudSession && firebaseUser && targetPerson) {
-      await saveCloudPerson(firebaseUser.uid, targetPerson);
+      void saveCloudPerson(firebaseUser.uid, targetPerson);
     }
     persistVaultChange({
       ...vault,
@@ -1742,7 +1724,7 @@ export default function App() {
     );
     const targetPerson = updatedPeople.find((p) => p.id === personId);
     if (isCloudSession && firebaseUser && targetPerson) {
-      await saveCloudPerson(firebaseUser.uid, targetPerson);
+      void saveCloudPerson(firebaseUser.uid, targetPerson);
     }
     persistVaultChange({
       ...vault,
@@ -1757,8 +1739,7 @@ export default function App() {
       id: `exp-${Date.now()}`,
     };
     if (isCloudSession && firebaseUser) {
-      await saveCloudExpectedItem(firebaseUser.uid, created);
-      return;
+      void saveCloudExpectedItem(firebaseUser.uid, created);
     }
     persistVaultChange({
       ...vault,
@@ -1770,8 +1751,7 @@ export default function App() {
     if (isAccountOnHold) return;
     const targetItem = vault.expectedItems.find((i) => i.id === itemId);
     if (isCloudSession) {
-      await deleteCloudExpectedItem(itemId);
-      return;
+      void deleteCloudExpectedItem(itemId);
     }
     const nextBin = targetItem
       ? pushToRecycleBin(vault.recycleBin, {
@@ -1794,11 +1774,16 @@ export default function App() {
   const handleLinkTransactionToPerson = async (
     txId: string,
     personId: string,
-    dueDate: string
+    dueDate: string,
+    directionOverride?: ExpectedItem['direction']
   ) => {
     if (isAccountOnHold) return;
     const targetTx = vault.transactions.find((t) => t.id === txId);
     if (!targetTx) return;
+
+    const resolvedDirection: ExpectedItem['direction'] =
+      directionOverride ||
+      (targetTx.type === 'borrowing_in' ? 'borrowed_from' : 'expecting_from');
 
     const linkedExpected: ExpectedItem = {
       id: `exp-link-${Date.now()}`,
@@ -1806,7 +1791,7 @@ export default function App() {
       title: `${targetTx.title} (From Ledger Record)`,
       amount: targetTx.amount,
       settledAmount: targetTx.status === 'settled' ? targetTx.amount : 0,
-      direction: targetTx.type === 'borrowing_in' ? 'borrowed_from' : 'expecting_from',
+      direction: resolvedDirection,
       category: targetTx.category,
       customCategory: targetTx.customCategory,
       date: targetTx.date,
@@ -1816,8 +1801,7 @@ export default function App() {
     };
 
     if (isCloudSession && firebaseUser) {
-      await saveCloudExpectedItem(firebaseUser.uid, linkedExpected);
-      return;
+      void saveCloudExpectedItem(firebaseUser.uid, linkedExpected);
     }
 
     const updatedTxs = vault.transactions.map((t) =>
@@ -1844,17 +1828,11 @@ export default function App() {
     };
 
     if (isCloudSession && firebaseUser) {
-      await saveCloudTransaction(firebaseUser.uid, unlinkedTx);
+      void saveCloudTransaction(firebaseUser.uid, unlinkedTx);
       const linkedExp = vault.expectedItems.find((e) => e.linkedTransactionId === txId);
       if (linkedExp) {
-        await deleteCloudExpectedItem(linkedExp.id);
+        void deleteCloudExpectedItem(linkedExp.id);
       }
-      triggerFeedback(
-        `Removed from Receivables & Payables (Record #${txId} kept in Main Records)`,
-        'success',
-        'toast'
-      );
-      return;
     }
 
     const updatedTxs = vault.transactions.map((t) => (t.id === txId ? unlinkedTx : t));
@@ -1895,14 +1873,19 @@ export default function App() {
     const nextStatus =
       nextSettled >= target.amount ? ('settled' as const) : ('partial' as const);
 
+    const isPayableDirection = target.direction === 'borrowed_from';
     const allocated = allocateNextRecordId(vault);
     const settlementTx: TransactionRecord = {
       id: allocated.recordId,
       date: new Date().toISOString().slice(0, 10),
-      title: `Settlement Received: ${target.title}`,
+      title: isPayableDirection
+        ? `Payable Settled: ${target.title}`
+        : `Settlement Received: ${target.title}`,
       amount: amountPaid,
-      type: 'income',
-      category: 'Loan Repayment Expected',
+      type: isPayableDirection ? 'expense' : 'income',
+      category: isPayableDirection
+        ? 'Borrowed / Payable Due'
+        : 'Loan Repayment Expected',
       accountId: depositAccountId || vault.accounts[0]?.id || 'acc-default',
       paymentMethod: 'Bank Transfer (ACH / NEFT / Wire)',
       personId: target.personId,
@@ -1910,28 +1893,38 @@ export default function App() {
     };
 
     if (isCloudSession && firebaseUser) {
-      await updateCloudExpectedSettlement(itemId, nextSettled, nextStatus);
-      await saveCloudTransaction(firebaseUser.uid, settlementTx);
-      return;
+      void updateCloudExpectedSettlement(itemId, nextSettled, nextStatus);
+      void saveCloudTransaction(firebaseUser.uid, settlementTx);
     }
 
     const updatedItems = vault.expectedItems.map((i) =>
       i.id === itemId ? { ...i, settledAmount: nextSettled, status: nextStatus } : i
     );
 
+    const updatedTxs = target.linkedTransactionId
+      ? vault.transactions.map((t) =>
+          t.id === target.linkedTransactionId
+            ? {
+                ...t,
+                settledAmount: nextSettled,
+                status: nextStatus === 'settled' ? ('settled' as const) : ('partial' as const),
+              }
+            : t
+        )
+      : vault.transactions;
+
     persistVaultChange({
       ...vault,
       nextRecordNumber: allocated.nextRecordNumber,
       expectedItems: updatedItems,
-      transactions: [settlementTx, ...vault.transactions],
+      transactions: [settlementTx, ...updatedTxs],
     });
   };
 
   const handleUpdateExpectedItem = async (updatedItem: ExpectedItem) => {
     if (isAccountOnHold) return;
     if (isCloudSession && firebaseUser) {
-      await saveCloudExpectedItem(firebaseUser.uid, updatedItem);
-      return;
+      void saveCloudExpectedItem(firebaseUser.uid, updatedItem);
     }
     const nextItems = vault.expectedItems.map((i) =>
       i.id === updatedItem.id ? updatedItem : i
@@ -2072,6 +2065,28 @@ export default function App() {
         nextTransactions = [settlementTx, ...nextTransactions];
       }
 
+      // If this expected item is linked to a non-split transaction, keep that transaction's status synced too
+      if (
+        target.linkedTransactionId &&
+        target.customCategory !== 'Split Bill Share' &&
+        !target.title.startsWith('Split Bill:')
+      ) {
+        nextTransactions = nextTransactions.map((t) =>
+          t.id === target.linkedTransactionId && !t.isSplit
+            ? {
+                ...t,
+                settledAmount: clampedSettled,
+                status:
+                  nextStatus === 'settled'
+                    ? ('settled' as const)
+                    : nextStatus === 'partial'
+                    ? ('partial' as const)
+                    : ('expected' as const),
+              }
+            : t
+        );
+      }
+
       const updatedItems = vault.expectedItems.map((i) =>
         i.id === recordId
           ? { ...i, settledAmount: clampedSettled, status: nextStatus }
@@ -2116,9 +2131,27 @@ export default function App() {
         : t
     );
 
+    const nextExpectedItems = vault.expectedItems.map((item) =>
+      item.linkedTransactionId === recordId &&
+      item.customCategory !== 'Split Bill Share' &&
+      !item.title.startsWith('Split Bill:')
+        ? {
+            ...item,
+            settledAmount: clampedSettled,
+            status:
+              nextTxStatus === 'settled'
+                ? ('settled' as const)
+                : nextTxStatus === 'partial'
+                ? ('partial' as const)
+                : ('pending' as const),
+          }
+        : item
+    );
+
     persistVaultChange({
       ...vault,
       transactions: nextTransactions,
+      expectedItems: nextExpectedItems,
     });
   };
 
@@ -2176,8 +2209,7 @@ export default function App() {
       id: `dream-${Date.now()}`,
     };
     if (isCloudSession && firebaseUser) {
-      await saveCloudDreamVault(firebaseUser.uid, created);
-      return;
+      void saveCloudDreamVault(firebaseUser.uid, created);
     }
     persistVaultChange({
       ...vault,
@@ -2188,7 +2220,7 @@ export default function App() {
   const handleUpdateDreamVault = async (updatedVault: DreamVault) => {
     if (isAccountOnHold) return;
     if (isCloudSession && firebaseUser) {
-      await saveCloudDreamVault(firebaseUser.uid, updatedVault);
+      void saveCloudDreamVault(firebaseUser.uid, updatedVault);
     }
     persistVaultChange({
       ...vault,
@@ -2200,8 +2232,7 @@ export default function App() {
     if (isAccountOnHold) return;
     const targetDream = vault.dreamVaults.find((v) => v.id === vaultId);
     if (isCloudSession) {
-      await deleteCloudDreamVault(vaultId);
-      return;
+      void deleteCloudDreamVault(vaultId);
     }
     const nextBin = targetDream
       ? pushToRecycleBin(vault.recycleBin, {
@@ -2248,9 +2279,8 @@ export default function App() {
     };
 
     if (isCloudSession && firebaseUser) {
-      await updateCloudDreamVaultAmount(vaultId, targetVault.currentAmount + amount);
-      await saveCloudTransaction(firebaseUser.uid, newTx);
-      return;
+      void updateCloudDreamVaultAmount(vaultId, targetVault.currentAmount + amount);
+      void saveCloudTransaction(firebaseUser.uid, newTx);
     }
 
     const updatedDreams = vault.dreamVaults.map((v) =>
@@ -3016,8 +3046,6 @@ export default function App() {
   );
 
   const savingsAndWalletAccounts = vault.accounts.filter((a) => a.type !== 'Loan Account');
-  const loanTypeAccounts = vault.accounts.filter((a) => a.type === 'Loan Account');
-  const activeLoansOnDashboard = (vault.loans || []).filter((l) => !l.archivedToHistory);
 
   // Show the On Hold Popup on login, on every browser refresh, or when Admin sends a new unread notice while on hold
   const shouldShowHoldPopup =
@@ -3334,180 +3362,163 @@ export default function App() {
           </div>
         )}
 
-        {/* Period & Section Subheader (Only rendered on Dashboard and Records to avoid duplicate headers on subviews) */}
-        {(activeSection === 'dashboard' || activeSection === 'records') && (
+        {/* Period & Section Subheader (Only rendered on Records — removed from Dashboard per Image 1 to save vertical space) */}
+        {activeSection === 'records' && (
           <div className="flex flex-wrap items-center justify-between gap-4 pb-3 border-b border-slate-200 dark:border-slate-800">
             <div>
               <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-                {activeSection === 'dashboard' && (
-                  <>
-                    <span>Dashboard</span>
-                    <InfoTip text="Clean read-only overview of your Savings Accounts, Wallets, Core Financial Position, Investments & FD breakdown, visual analytics, and recurring commitments." />
-                  </>
-                )}
-                {activeSection === 'records' && (
-                  <>
-                    <span>Records — Income &amp; Expenses</span>
-                    <InfoTip text="Complete transaction ledger for Expenses, Income, and Transfers (Self Transfers & Paid EMIs), plus Recurring & Compulsory Payments." />
-                  </>
-                )}
+                <span>Records — Income &amp; Expenses</span>
+                <InfoTip text="Complete transaction ledger for Expenses, Income, and Transfers (Self Transfers & Paid EMIs), plus Recurring & Compulsory Payments." />
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Active Workspace: @{currentUser.username} · Currency: {currency}
               </p>
             </div>
 
-            {activeSection === 'records' && (
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  <label
-                    htmlFor="month-period-select"
-                    className="text-xs font-bold text-slate-500 dark:text-slate-400"
-                  >
-                    Month (Jan 2026+):
-                  </label>
-                  <select
-                    id="month-period-select"
-                    value={selectedMonth}
-                    onChange={(e) => setSelectedMonth(e.target.value)}
-                    aria-label="Select Month Period"
-                    className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white cursor-pointer"
-                  >
-                    <option value="ALL">All Time (Every Month)</option>
-                    {availableMonths.map((m) => (
-                      <option key={m.key} value={m.key}>
-                        {m.label} ({m.key})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedMonth('ALL')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
-                    selectedMonth === 'ALL'
-                      ? 'bg-emerald-600 text-white border-emerald-600'
-                      : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900'
-                  }`}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <label
+                  htmlFor="month-period-select"
+                  className="text-xs font-bold text-slate-500 dark:text-slate-400"
                 >
-                  All Time
-                </button>
+                  Month (Jan 2026+):
+                </label>
+                <select
+                  id="month-period-select"
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  aria-label="Select Month Period"
+                  className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white cursor-pointer"
+                >
+                  <option value="ALL">All Time (Every Month)</option>
+                  {availableMonths.map((m) => (
+                    <option key={m.key} value={m.key}>
+                      {m.label} ({m.key})
+                    </option>
+                  ))}
+                </select>
               </div>
-            )}
+              <button
+                type="button"
+                onClick={() => setSelectedMonth('ALL')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
+                  selectedMonth === 'ALL'
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900'
+                }`}
+              >
+                All Time
+              </button>
+            </div>
           </div>
         )}
 
-        {/* TAB 1: DASHBOARD (Clean Read-Only Overview Mode with 3 Strict Visual Sections) */}
+        {/* TAB 1: DASHBOARD (Unified 1-Window Split Table for Accounts & Loans + Core Financial Position Summary) */}
         {activeSection === 'dashboard' && (
-          <div className="space-y-8" data-testid="dashboard-overview-container">
-            {/* SECTION 1 (TOP): Single Unified Window with Savings & Wallets / Loan Accounts Toggle (Medium Cards, Max 4 Per Row) */}
+          <div className="space-y-7" data-testid="dashboard-overview-container">
+            {/* SECTION 1 (TOP): Unified Single Window Divided at Center — Left: Savings Banks, Cards, Wallets & Cash | Right: Loan Section (Legal/Bank/Card/Company Loans + Differentiated Personal/Market Loans) */}
             <section
               aria-labelledby="dashboard-section-1-heading"
               data-testid="dashboard-section-1-bank-cards"
-              className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 shadow-sm space-y-4"
+              className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden"
             >
-              <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-1.5">
-                    <h2
-                      id="dashboard-section-1-heading"
-                      className="text-sm font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300"
-                    >
-                      Accounts &amp; Loans Overview
-                    </h2>
-                    <InfoTip text="Switch between your liquid Savings Accounts & Wallets and your active Loan Accounts (in banks, apps, or organizations). Maximum 4 medium cards per row." />
-                  </div>
-
-                  {/* Unified Window Toggle: Savings & Wallets vs Loan Accounts */}
-                  <div
-                    role="tablist"
-                    aria-label="Savings and Loans Switcher"
-                    className="inline-flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700"
+              {/* Top Window Header Bar */}
+              <div className="px-4 sm:px-5 py-3 bg-slate-50/80 dark:bg-slate-900/90 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <h2
+                    id="dashboard-section-1-heading"
+                    className="text-sm font-extrabold uppercase tracking-wider text-slate-800 dark:text-slate-200"
                   >
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={dashboardTopTab === 'savings'}
-                      data-testid="dashboard-top-tab-savings"
-                      onClick={() => setDashboardTopTab('savings')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                        dashboardTopTab === 'savings'
-                          ? 'bg-emerald-600 text-white shadow-sm'
-                          : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                      }`}
-                    >
-                      <Wallet className="w-3.5 h-3.5" />
-                      <span>Savings &amp; Wallets ({savingsAndWalletAccounts.length})</span>
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={dashboardTopTab === 'loans'}
-                      data-testid="dashboard-top-tab-loans"
-                      onClick={() => setDashboardTopTab('loans')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                        dashboardTopTab === 'loans'
-                          ? 'bg-indigo-600 text-white shadow-sm'
-                          : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                      }`}
-                    >
-                      <Calculator className="w-3.5 h-3.5" />
-                      <span>
-                        Loan Accounts ({activeLoansOnDashboard.length + loanTypeAccounts.length})
-                      </span>
-                    </button>
-                  </div>
+                    Accounts &amp; Loans Overview
+                  </h2>
+                  <InfoTip text="Unified single-window table view: All Savings Banks, Cards, Wallets & Cash on the Left Side, and all Active Loans (Bank, Credit Card, Company & Differentiated Personal Loans) on the Right Side." />
                 </div>
-
-                {dashboardTopTab === 'savings' ? (
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setActiveSection('accounts')}
                     data-testid="dashboard-manage-accounts-link"
-                    className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/70 hover:border-emerald-500/50 text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5 cursor-pointer"
                   >
                     <span>Manage Accounts</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
-                ) : (
                   <button
                     type="button"
                     onClick={() => setActiveSection('loans')}
                     data-testid="dashboard-manage-loans-link"
-                    className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/70 hover:border-indigo-500/50 text-xs font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 hover:bg-indigo-500/20 text-xs font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5 cursor-pointer"
                   >
                     <span>Manage Loans &amp; EMI</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
-                )}
+                </div>
               </div>
 
-              {/* TAB PANEL A: SAVINGS ACCOUNTS, WALLETS & CASH (Medium Cards, Max 4 in 1 Line, Clean Top View) */}
-              {dashboardTopTab === 'savings' && (
-                <>
+              {/* UNIFIED 2-COLUMN SPLIT TABLE LAYOUT (Left: Savings/Wallets/Cash | Center Divider | Right: Loans) */}
+              <div
+                data-testid="dashboard-unified-accounts-loans-split"
+                className="grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800"
+              >
+                {/* LEFT COLUMN: ALL SAVINGS BANKS, CARDS, WALLETS & CASH */}
+                <div
+                  data-testid="dashboard-left-savings-column"
+                  className="lg:col-span-6 p-4 sm:p-5 space-y-3.5 bg-white dark:bg-slate-900"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                        <Wallet className="w-3.5 h-3.5" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-extrabold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                          Savings Banks, Cards, Wallets &amp; Cash ({savingsAndWalletAccounts.length})
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Liquid Bank Accounts, Credit Cards, Cash &amp; Digital Wallets
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        Total Liquid Balance
+                      </div>
+                      <div
+                        data-testid="dashboard-left-savings-total"
+                        className="text-sm font-extrabold font-mono tabular-nums text-emerald-600 dark:text-emerald-400"
+                      >
+                        {currency}
+                        {dashboardSummaryCards.totalCountedInAllMyAccounts.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
                   {savingsAndWalletAccounts.length === 0 ? (
-                    <div className="p-6 rounded-xl border border-dashed border-slate-300 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex flex-wrap items-center justify-between gap-4">
+                    <div className="p-5 rounded-xl border border-dashed border-slate-300 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <div className="text-sm font-bold text-slate-900 dark:text-white">
                           No Savings Accounts or Wallets Added Yet
                         </div>
                         <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                          Open the Accounts tab to add your first Savings Account, Cash Wallet, or Digital Wallet.
+                          Add your Savings Account, Cash Wallet, or Digital Wallet in the Accounts tab.
                         </div>
                       </div>
                       <button
                         type="button"
                         onClick={() => setActiveSection('accounts')}
-                        className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer ${accentBtnClass}`}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer ${accentBtnClass}`}
                       >
                         <Landmark className="w-4 h-4" />
-                        <span>Go to Accounts Tab</span>
+                        <span>Add Account</span>
                       </button>
                     </div>
                   ) : (
                     <div
                       data-testid="dashboard-savings-cards-grid"
-                      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5"
+                      className="grid grid-cols-1 sm:grid-cols-2 gap-3"
                     >
                       {savingsAndWalletAccounts.map((acc) => {
                         const actualBalance = calculateAccountBalance(acc, vault.transactions);
@@ -3558,7 +3569,6 @@ export default function App() {
                                 </div>
                               </div>
 
-                              {/* Small Color Theme Mixer Icon on Top Right */}
                               <div className="flex items-center gap-1 shrink-0">
                                 <CardColorMixerButton
                                   color={cardColor}
@@ -3577,7 +3587,6 @@ export default function App() {
                               </div>
                             </div>
 
-                            {/* Account Number Row with Show/Hide Toggle */}
                             <div className="mt-3 flex items-center justify-between text-[11px] text-white/85">
                               <div className="font-mono tracking-wider truncate">
                                 <span className="text-white/70 mr-1">A/C:</span>
@@ -3615,7 +3624,6 @@ export default function App() {
                               )}
                             </div>
 
-                            {/* Current Balance Row */}
                             <div className="mt-2.5 pt-2.5 border-t border-white/15 flex items-baseline justify-between gap-2">
                               <span className="text-[10px] font-extrabold uppercase tracking-wider text-white/80">
                                 CURRENT BALANCE
@@ -3637,222 +3645,319 @@ export default function App() {
                       })}
                     </div>
                   )}
-                </>
-              )}
+                </div>
 
-              {/* TAB PANEL B: LOAN ACCOUNTS IN BANKS, APPS, OR ORGANIZATIONS (Medium Cards, Max 4 in 1 Line) */}
-              {dashboardTopTab === 'loans' && (
-                <>
-                  {activeLoansOnDashboard.length === 0 && loanTypeAccounts.length === 0 ? (
-                    <div className="p-6 rounded-xl border border-dashed border-slate-300 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex flex-wrap items-center justify-between gap-4">
+                {/* RIGHT COLUMN: LOAN SECTION (Bank Loans, Credit Card Loans, Company Loans + Differentiated Personal & Market Loans) */}
+                <div
+                  data-testid="dashboard-right-loans-column"
+                  className="lg:col-span-6 p-4 sm:p-5 space-y-4 bg-slate-50/40 dark:bg-slate-900/50"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                        <Calculator className="w-3.5 h-3.5" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-extrabold uppercase tracking-wider text-indigo-900 dark:text-indigo-300">
+                          Loan Section ({dashboardSummaryCards.totalActiveLoansCount})
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Bank, Credit Card &amp; Company Loans + Differentiated Personal / Market Loans
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        Total Loan Balance
+                      </div>
+                      <div
+                        data-testid="dashboard-right-loans-total"
+                        className="text-sm font-extrabold font-mono tabular-nums text-indigo-600 dark:text-indigo-400"
+                      >
+                        {currency}
+                        {dashboardSummaryCards.theLoansActiveBalance.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {dashboardSummaryCards.totalActiveLoansCount === 0 ? (
+                    <div className="p-5 rounded-xl border border-dashed border-slate-300 dark:border-slate-800 bg-white dark:bg-slate-900/60 flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <div className="text-sm font-bold text-slate-900 dark:text-white">
                           No Active Loan Accounts Found
                         </div>
                         <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                          Add bank loans, app credit lines, or organization/person loans in the Loans &amp; EMI section.
+                          Add Bank, Credit Card, Company, or Personal/Market loans in Loans &amp; EMI.
                         </div>
                       </div>
                       <button
                         type="button"
                         onClick={() => setActiveSection('loans')}
-                        className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 cursor-pointer"
+                        className="px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1.5 cursor-pointer"
                       >
                         <Calculator className="w-4 h-4" />
                         <span>Open Loans &amp; EMI</span>
                       </button>
                     </div>
                   ) : (
-                    <div
-                      data-testid="dashboard-loan-cards-grid"
-                      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5"
-                    >
-                      {loanTypeAccounts.map((acc) => {
-                        const actualBalance = calculateAccountBalance(acc, vault.transactions);
-                        const cardColor = acc.color || '#be123c';
-                        const matchedBrand = resolveBankLogoFromName(acc.name);
-                        const fallbackCrest = generateBankFallbackSvgDataUrl(acc.name, cardColor);
-                        const syncedLogo = acc.bankLogoUrl || matchedBrand?.logoUrl || fallbackCrest;
-                        const maskedNumber = maskAccountNumber(acc.accountNumber);
+                    <div data-testid="dashboard-loan-cards-grid" className="space-y-4">
+                      {/* SUBSECTION 1: LEGAL & AGREEMENT LOANS (Bank Loans, Credit Card Loans, Company / Card Loans) */}
+                      <div
+                        data-testid="dashboard-top-legal-loans-subsection"
+                        className="rounded-xl border border-indigo-500/25 bg-white dark:bg-slate-900 p-3 space-y-2.5"
+                      >
+                        <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100 dark:border-slate-800">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
+                            <span className="text-[11px] font-extrabold uppercase tracking-wider text-indigo-900 dark:text-indigo-300">
+                              1. Bank, Credit Card &amp; Company Agreement Loans (
+                              {dashboardSummaryCards.legalAgreementLoansCount})
+                            </span>
+                          </div>
+                          <span className="text-xs font-extrabold font-mono text-indigo-600 dark:text-indigo-400">
+                            {currency}
+                            {dashboardSummaryCards.properEmiLoansBalance.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </span>
+                        </div>
 
-                        return (
-                          <div
-                            key={acc.id}
-                            data-testid={`dashboard-top-loan-acc-card-${acc.id}`}
-                            style={{
-                              background: `linear-gradient(135deg, ${cardColor} 0%, #0f172a 100%)`,
-                            }}
-                            className="rounded-xl p-3.5 text-white relative shadow-sm hover:shadow-md transition-all duration-300 flex flex-col justify-between border border-white/10"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <img
-                                  src={syncedLogo}
-                                  onError={(e) => {
-                                    e.currentTarget.onerror = null;
-                                    e.currentTarget.src = fallbackCrest;
+                        {dashboardSummaryCards.legalAgreementLoans.length === 0 ? (
+                          <div className="py-2 text-[11px] text-slate-500 dark:text-slate-400">
+                            No signed Bank, Credit Card, or Company agreement loans active.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {dashboardSummaryCards.legalAgreementLoans.map((item) => {
+                              const cardColor = item.cardColor || '#4338ca';
+                              const matchedBrand = resolveBankLogoFromName(item.name);
+                              const fallbackCrest = generateBankFallbackSvgDataUrl(
+                                item.name,
+                                cardColor
+                              );
+                              const syncedLogo =
+                                item.bankLogoUrl || matchedBrand?.logoUrl || fallbackCrest;
+                              const maskedNumber = maskAccountNumber(item.accountNumberMasked);
+
+                              return (
+                                <div
+                                  key={item.id}
+                                  data-testid={
+                                    item.source === 'account_card'
+                                      ? `dashboard-top-loan-acc-card-${item.id}`
+                                      : `dashboard-top-loan-card-${item.id}`
+                                  }
+                                  style={{
+                                    background: `linear-gradient(135deg, ${cardColor} 0%, #0f172a 100%)`,
                                   }}
-                                  alt={acc.name}
-                                  className="w-9 h-9 rounded-xl object-contain bg-white p-1 shrink-0 shadow-sm"
-                                />
-                                <div className="min-w-0">
-                                  <div className="text-sm font-extrabold text-white leading-snug break-words">
-                                    {acc.name}
+                                  className="rounded-xl p-3.5 text-white relative shadow-sm hover:shadow-md transition-all duration-300 flex flex-col justify-between border border-white/10"
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                      <img
+                                        src={syncedLogo}
+                                        onError={(e) => {
+                                          e.currentTarget.onerror = null;
+                                          e.currentTarget.src = fallbackCrest;
+                                        }}
+                                        alt={item.name}
+                                        className="w-9 h-9 rounded-xl object-contain bg-white p-1 shrink-0 shadow-sm"
+                                      />
+                                      <div className="min-w-0">
+                                        <div className="text-sm font-extrabold text-white leading-snug break-words">
+                                          {item.name}
+                                        </div>
+                                        <div className="text-[11px] text-white/80 leading-tight break-words">
+                                          {item.lenderOrCategoryLabel}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {item.loanAccount ? (
+                                      <CardColorMixerButton
+                                        color={cardColor}
+                                        onChange={(newHex) => {
+                                          void handleSaveAccountFromTab(
+                                            {
+                                              ...item.loanAccount!,
+                                              color: newHex,
+                                            },
+                                            true
+                                          );
+                                        }}
+                                        label="Loan Card Theme Color"
+                                        testId={`dashboard-loan-acc-color-mixer-${item.id}`}
+                                      />
+                                    ) : (
+                                      <span className="px-2 py-0.5 rounded-md bg-white/15 border border-white/20 text-[10px] font-bold uppercase tracking-wider text-white shrink-0">
+                                        {item.subTypeBadge}
+                                      </span>
+                                    )}
                                   </div>
-                                  <div className="text-[11px] text-white/80 leading-tight">
-                                    Loan Account
+
+                                  <div className="mt-2.5 flex items-center justify-between text-[11px] text-white/85">
+                                    {item.source === 'account_card' ? (
+                                      <span className="font-mono">A/C: {maskedNumber}</span>
+                                    ) : (
+                                      <span>
+                                        Principal:{' '}
+                                        <strong className="font-mono">
+                                          {currency}
+                                          {item.principalAmount.toLocaleString()}
+                                        </strong>
+                                      </span>
+                                    )}
+                                    <span className="px-2 py-0.5 rounded-md bg-white/15 border border-white/20 text-[10px] font-bold uppercase tracking-wider text-white">
+                                      {item.status}
+                                    </span>
+                                  </div>
+
+                                  {item.monthlyEmi > 0 && (
+                                    <div className="mt-1.5 flex items-center justify-between text-[11px] text-amber-200 font-semibold">
+                                      <span>Monthly EMI</span>
+                                      <span className="font-mono font-bold">
+                                        {currency}
+                                        {Math.round(item.monthlyEmi).toLocaleString()}/mo
+                                      </span>
+                                    </div>
+                                  )}
+
+                                  <div className="mt-2.5 pt-2.5 border-t border-white/15 flex items-baseline justify-between gap-2">
+                                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-white/80">
+                                      REMAINING LOAN
+                                    </span>
+                                    <span className="text-lg font-extrabold font-mono tabular-nums text-white">
+                                      {currency}
+                                      {item.remainingBalance.toLocaleString(undefined, {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      })}
+                                    </span>
                                   </div>
                                 </div>
-                              </div>
-                              <CardColorMixerButton
-                                color={cardColor}
-                                onChange={(newHex) => {
-                                  void handleSaveAccountFromTab(
-                                    {
-                                      ...acc,
-                                      color: newHex,
-                                    },
-                                    true
-                                  );
-                                }}
-                                label="Loan Card Theme Color"
-                                testId={`dashboard-loan-acc-color-mixer-${acc.id}`}
-                              />
-                            </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
 
-                            <div className="mt-3 flex items-center justify-between text-[11px] text-white/85">
-                              <span className="font-mono">A/C: {maskedNumber}</span>
-                              <span className="px-2 py-0.5 rounded-md bg-white/15 border border-white/20 text-[10px] font-bold uppercase tracking-wider text-white">
-                                {acc.loanStatus || 'In Progress'}
-                              </span>
-                            </div>
-
-                            {acc.bankGivenEmi !== undefined && acc.bankGivenEmi > 0 && (
-                              <div className="mt-1.5 flex items-center justify-between text-[11px] text-amber-200 font-semibold">
-                                <span>EMI Given by Bank</span>
-                                <span className="font-mono font-bold">
-                                  {currency}
-                                  {acc.bankGivenEmi.toLocaleString()}/mo
-                                </span>
-                              </div>
+                      {/* SUBSECTION 2: DIFFERENTIATED PERSONAL & MARKET LOANS (Unstructured / Person / Market Loans) */}
+                      <div
+                        data-testid="dashboard-top-personal-loans-subsection"
+                        className="rounded-xl border-2 border-amber-500/40 bg-gradient-to-br from-amber-500/10 via-orange-50/40 to-amber-500/5 dark:from-amber-950/30 dark:via-slate-900 dark:to-slate-900 p-3 space-y-2.5"
+                      >
+                        <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-amber-500/20">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                            <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-900 dark:text-amber-300">
+                              2. Personal &amp; Market Loans ({dashboardSummaryCards.personalMarketLoansCount})
+                            </span>
+                          </div>
+                          <span className="text-xs font-extrabold font-mono text-amber-700 dark:text-amber-400">
+                            {currency}
+                            {dashboardSummaryCards.flexiblePersonOrgLoansBalance.toLocaleString(
+                              undefined,
+                              {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              }
                             )}
+                          </span>
+                        </div>
 
-                            <div className="mt-2.5 pt-2.5 border-t border-white/15 flex items-baseline justify-between gap-2">
-                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-white/80">
-                                REMAINING LOAN
-                              </span>
-                              <span className="text-lg font-extrabold font-mono tabular-nums text-white">
-                                {currency}
-                                {(acc.currentRemainingLoanAmount !== undefined
-                                  ? acc.currentRemainingLoanAmount
-                                  : Math.abs(actualBalance)
-                                ).toLocaleString(undefined, {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
-                              </span>
-                            </div>
+                        {dashboardSummaryCards.personalMarketLoans.length === 0 ? (
+                          <div className="py-2 flex items-center justify-between gap-2 text-[11px] text-amber-800/80 dark:text-amber-300/80">
+                            <span>
+                              No Personal or Market open-tenure loans recorded right now.
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setActiveSection('loans')}
+                              className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold shrink-0 cursor-pointer"
+                            >
+                              + Add Personal Loan
+                            </button>
                           </div>
-                        );
-                      })}
-                      {activeLoansOnDashboard.map((loan) => {
-                        const schedule = calculateLoanAmortizationSchedule(loan);
-                        const isOpenTenure = loan.loanType === 'person_org_no_tenure';
-                        const lenderOrCat =
-                          loan.lenderName ||
-                          resolveFlexibleLabel(loan.category, loan.customCategory);
-                        const matchedBrand = resolveBankLogoFromName(
-                          loan.lenderName || loan.name
-                        );
-                        const cardBgColor = isOpenTenure ? '#b45309' : '#4338ca';
-                        const fallbackCrest = generateBankFallbackSvgDataUrl(
-                          loan.lenderName || loan.name,
-                          cardBgColor
-                        );
-                        const loanLogo = matchedBrand?.logoUrl || fallbackCrest;
-
-                        return (
-                          <div
-                            key={loan.id}
-                            data-testid={`dashboard-top-loan-card-${loan.id}`}
-                            style={{
-                              background: `linear-gradient(135deg, ${cardBgColor} 0%, #0f172a 100%)`,
-                            }}
-                            className="rounded-xl p-3.5 text-white relative shadow-sm hover:shadow-md transition-all duration-300 flex flex-col justify-between border border-white/10"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <img
-                                  src={loanLogo}
-                                  onError={(e) => {
-                                    e.currentTarget.onerror = null;
-                                    e.currentTarget.src = fallbackCrest;
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {dashboardSummaryCards.personalMarketLoans.map((item) => {
+                              const cardBgColor = item.cardColor || '#b45309';
+                              const fallbackCrest = generateBankFallbackSvgDataUrl(
+                                item.name,
+                                cardBgColor
+                              );
+                              return (
+                                <div
+                                  key={item.id}
+                                  data-testid={`dashboard-top-personal-loan-card-${item.id}`}
+                                  style={{
+                                    background: `linear-gradient(135deg, ${cardBgColor} 0%, #451a03 100%)`,
                                   }}
-                                  alt={loan.name}
-                                  className="w-9 h-9 rounded-xl object-contain bg-white p-1 shrink-0 shadow-sm"
-                                />
-                                <div className="min-w-0">
-                                  <div className="text-sm font-extrabold text-white leading-snug break-words">
-                                    {loan.name}
+                                  className="rounded-xl p-3.5 text-white relative shadow-sm hover:shadow-md transition-all duration-300 flex flex-col justify-between border-2 border-amber-400/30"
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                      <img
+                                        src={fallbackCrest}
+                                        alt={item.name}
+                                        className="w-9 h-9 rounded-xl object-contain bg-amber-50 p-1 shrink-0 shadow-sm"
+                                      />
+                                      <div className="min-w-0">
+                                        <div className="text-sm font-extrabold text-white leading-snug break-words">
+                                          {item.name}
+                                        </div>
+                                        <div className="text-[11px] text-amber-100/90 leading-tight break-words">
+                                          {item.lenderOrCategoryLabel}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <span className="px-2 py-0.5 rounded-md bg-amber-400/20 border border-amber-300/40 text-[10px] font-extrabold uppercase tracking-wider text-amber-100 shrink-0">
+                                      Personal / Market
+                                    </span>
                                   </div>
-                                  <div className="text-[11px] text-white/80 leading-tight break-words">
-                                    {lenderOrCat}
+
+                                  <div className="mt-2.5 flex items-center justify-between text-[11px] text-amber-100/90">
+                                    <span>
+                                      Borrowed:{' '}
+                                      <strong className="font-mono">
+                                        {currency}
+                                        {item.principalAmount.toLocaleString()}
+                                      </strong>
+                                    </span>
+                                    <span>
+                                      Paid:{' '}
+                                      <strong className="font-mono">
+                                        {currency}
+                                        {item.totalAmountPaidSoFar.toLocaleString()}
+                                      </strong>
+                                    </span>
+                                  </div>
+
+                                  <div className="mt-2.5 pt-2.5 border-t border-amber-300/20 flex items-baseline justify-between gap-2">
+                                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-200">
+                                      REMAINING DUE
+                                    </span>
+                                    <span className="text-lg font-extrabold font-mono tabular-nums text-white">
+                                      {currency}
+                                      {item.remainingBalance.toLocaleString(undefined, {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      })}
+                                    </span>
                                   </div>
                                 </div>
-                              </div>
-                              <span className="px-2 py-0.5 rounded-md bg-white/15 border border-white/20 text-[10px] font-bold uppercase tracking-wider text-white shrink-0">
-                                {isOpenTenure ? 'Open-Tenure' : 'EMI Loan'}
-                              </span>
-                            </div>
-
-                            <div className="mt-3 flex items-center justify-between text-[11px] text-white/85">
-                              <span>
-                                Principal:{' '}
-                                <strong className="font-mono">
-                                  {currency}
-                                  {loan.principalAmount.toLocaleString()}
-                                </strong>
-                              </span>
-                              <span>
-                                {isOpenTenure ? (
-                                  <>
-                                    Paid:{' '}
-                                    <strong className="font-mono">
-                                      {currency}
-                                      {schedule.totalAmountPaidSoFar.toLocaleString()}
-                                    </strong>
-                                  </>
-                                ) : (
-                                  <>
-                                    EMI:{' '}
-                                    <strong className="font-mono">
-                                      {currency}
-                                      {Math.round(schedule.scheduledMonthlyEmi).toLocaleString()}/mo
-                                    </strong>
-                                  </>
-                                )}
-                              </span>
-                            </div>
-
-                            <div className="mt-2.5 pt-2.5 border-t border-white/15 flex items-baseline justify-between gap-2">
-                              <span className="text-[10px] font-extrabold uppercase tracking-wider text-white/80">
-                                REMAINING DUE
-                              </span>
-                              <span className="text-lg font-extrabold font-mono tabular-nums text-white">
-                                {currency}
-                                {schedule.remainingBalance.toLocaleString(undefined, {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
-                              </span>
-                            </div>
+                              );
+                            })}
                           </div>
-                        );
-                      })}
+                        )}
+                      </div>
                     </div>
                   )}
-                </>
-              )}
+                </div>
+              </div>
             </section>
 
             {/* SUBTLE VISUAL DIVIDER */}
@@ -4085,7 +4190,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Summary Card 4: The Loans (Default Indigo Theme) */}
+                {/* Summary Card 4: The Loans (Default Indigo Theme — Synced with Top Loan Section & Loans & EMI Tab) */}
                 <div
                   role="button"
                   tabIndex={0}
@@ -4115,7 +4220,7 @@ export default function App() {
                             The Loans
                           </div>
                           <p className="text-[11px] text-slate-600 dark:text-slate-400 whitespace-normal break-words leading-snug mt-0.5">
-                            Active Loan Balances ({activeLoansOnDashboard.length})
+                            Active Loan Balances ({dashboardSummaryCards.totalActiveLoansCount})
                           </p>
                         </div>
                       </div>
@@ -4146,7 +4251,7 @@ export default function App() {
                       className="p-1.5 rounded-lg bg-white/80 dark:bg-slate-900/70 border border-indigo-500/20"
                     >
                       <div className="text-[9px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300 whitespace-normal break-words leading-tight">
-                        Structured EMI Loans
+                        Legal &amp; Bank Loans ({dashboardSummaryCards.legalAgreementLoansCount})
                       </div>
                       <div
                         data-testid="dashboard-loan-sub-proper-emi-value"
@@ -4161,7 +4266,7 @@ export default function App() {
                       className="p-1.5 rounded-lg bg-white/80 dark:bg-slate-900/70 border border-amber-500/20"
                     >
                       <div className="text-[9px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300 whitespace-normal break-words leading-tight">
-                        Open-Tenure Loans
+                        Personal &amp; Market ({dashboardSummaryCards.personalMarketLoansCount})
                       </div>
                       <div
                         data-testid="dashboard-loan-sub-open-tenure-value"
@@ -4436,224 +4541,487 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* 2. EXPANDED VIEW FOR EXPECTED MONEY COMING IN (Synced Live Receivable Records) */}
-                  {expandedSummaryCard === 'expectedIn' && (
-                    <div
-                      data-testid="expanded-panel-expected-in"
-                      className="space-y-3"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="px-2 py-0.5 rounded-md bg-sky-500/15 text-sky-700 dark:text-sky-300 text-[10px] font-extrabold uppercase tracking-wider">
-                              View-Only Synced Ledger
-                            </span>
-                            <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
-                              Expected Money Coming In — Live Receivable Records (
-                              {dashboardSummaryCards.liveReceivableRecords.length})
-                            </h3>
-                          </div>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                            100% synced with the Receivables &amp; Payables tab (includes pending expected income, lending, and split bills).
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setActiveSection('people')}
-                            className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
-                          >
-                            <span>Open Receivables &amp; Payables</span>
-                            <ArrowRight className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            data-testid="close-expanded-summary-panel"
-                            onClick={() => setExpandedSummaryCard(null)}
-                            className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 cursor-pointer"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                            <span>Close</span>
-                          </button>
-                        </div>
-                      </div>
+                  {/* 2. EXPANDED VIEW FOR EXPECTED MONEY COMING IN (Interactive Synced Live Receivable Records) */}
+                  {expandedSummaryCard === 'expectedIn' && (() => {
+                    const allReceivables = dashboardSummaryCards.liveReceivableRecords;
+                    const personMap = new Map<string, { id: string; name: string; due: number; count: number }>();
+                    for (const rec of allReceivables) {
+                      const pid = rec.personId || rec.personName;
+                      const prev = personMap.get(pid) || {
+                        id: rec.personId || '',
+                        name: rec.personName,
+                        due: 0,
+                        count: 0,
+                      };
+                      prev.due = Math.round((prev.due + rec.remainingAmount) * 100) / 100;
+                      prev.count += 1;
+                      personMap.set(pid, prev);
+                    }
+                    const personPills = Array.from(personMap.values());
+                    const filteredReceivables =
+                      dashboardReceivablePersonFilter === 'ALL'
+                        ? allReceivables
+                        : allReceivables.filter(
+                            (r) =>
+                              (r.personId || r.personName) === dashboardReceivablePersonFilter
+                          );
 
-                      {dashboardSummaryCards.liveReceivableRecords.length === 0 ? (
-                        <div className="p-6 text-center text-xs text-slate-500 dark:text-slate-400 rounded-xl bg-slate-50 dark:bg-slate-800/50">
-                          No pending receivable records owed to you right now.
+                    return (
+                      <div
+                        data-testid="expanded-panel-expected-in"
+                        className="space-y-3.5"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded-md bg-sky-500/15 text-sky-700 dark:text-sky-300 text-[10px] font-extrabold uppercase tracking-wider">
+                                Live Interactive Synced Ledger
+                              </span>
+                              <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                                Expected Money Coming In — Live Receivable Records (
+                                {allReceivables.length})
+                              </h3>
+                            </div>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                              Fetched live from Receivables &amp; Payables. Filter by person, mark settled directly, or jump to a person&rsquo;s ledger.
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              data-testid="expected-in-open-people-btn"
+                              onClick={() => {
+                                if (dashboardReceivablePersonFilter !== 'ALL') {
+                                  setSelectedPeoplePersonId(dashboardReceivablePersonFilter);
+                                }
+                                setActiveSection('people');
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>Open Receivables &amp; Payables</span>
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="close-expanded-summary-panel"
+                              onClick={() => setExpandedSummaryCard(null)}
+                              className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              <span>Close</span>
+                            </button>
+                          </div>
                         </div>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse text-xs">
-                            <thead>
-                              <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
-                                <th className="py-2 pr-3">Person / Entity</th>
-                                <th className="py-2 px-3">Item Description</th>
-                                <th className="py-2 px-3">Date / Due</th>
-                                <th className="py-2 px-3">Category</th>
-                                <th className="py-2 px-3 text-right">Total</th>
-                                <th className="py-2 px-3 text-right">Settled</th>
-                                <th className="py-2 pl-3 text-right">Remaining Receivable</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
-                              {dashboardSummaryCards.liveReceivableRecords.map((rec) => (
-                                <tr key={`${rec.personId}-${rec.id}`}>
-                                  <td className="py-2.5 pr-3 font-bold text-slate-900 dark:text-white">
-                                    {rec.personName}
-                                  </td>
-                                  <td className="py-2.5 px-3 text-slate-700 dark:text-slate-300">
-                                    {rec.title}
-                                  </td>
-                                  <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">
-                                    {rec.date}
-                                    {rec.dueDate && rec.dueDate !== rec.date
-                                      ? ` · Due ${rec.dueDate}`
-                                      : ''}
-                                  </td>
-                                  <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400">
-                                    {rec.category}
-                                  </td>
-                                  <td className="py-2.5 px-3 text-right font-mono text-slate-700 dark:text-slate-300">
-                                    {currency}
-                                    {rec.totalAmount.toLocaleString()}
-                                  </td>
-                                  <td className="py-2.5 px-3 text-right font-mono text-emerald-600 dark:text-emerald-400">
-                                    {currency}
-                                    {rec.settledAmount.toLocaleString()}
-                                  </td>
-                                  <td className="py-2.5 pl-3 text-right font-mono font-extrabold text-sky-600 dark:text-sky-400">
+
+                        {personPills.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setDashboardReceivablePersonFilter('ALL')}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                                dashboardReceivablePersonFilter === 'ALL'
+                                  ? 'bg-sky-600 text-white border-sky-600'
+                                  : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                              }`}
+                            >
+                              All People ({allReceivables.length})
+                            </button>
+                            {personPills.map((p) => {
+                              const key = p.id || p.name;
+                              const isSelected = dashboardReceivablePersonFilter === key;
+                              return (
+                                <button
+                                  key={key}
+                                  type="button"
+                                  data-testid={`dashboard-receivable-person-pill-${key}`}
+                                  onClick={() =>
+                                    setDashboardReceivablePersonFilter(isSelected ? 'ALL' : key)
+                                  }
+                                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer flex items-center gap-1.5 ${
+                                    isSelected
+                                      ? 'bg-sky-600 text-white border-sky-600'
+                                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-sky-500/50'
+                                  }`}
+                                >
+                                  <span>{p.name}</span>
+                                  <span className="font-mono text-[11px] opacity-90">
                                     +{currency}
-                                    {rec.remainingAmount.toLocaleString()}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* 3. EXPANDED VIEW FOR THE MONEY I OWE (Synced Live Payable Records) */}
-                  {expandedSummaryCard === 'moneyIOwe' && (
-                    <div
-                      data-testid="expanded-panel-money-i-owe"
-                      className="space-y-3"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-extrabold uppercase tracking-wider">
-                              View-Only Synced Ledger
-                            </span>
-                            <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
-                              The Money I Owe — Live Quick Payable Records (
-                              {dashboardSummaryCards.livePayableRecords.length})
-                            </h3>
+                                    {p.due.toLocaleString()}
+                                  </span>
+                                </button>
+                              );
+                            })}
                           </div>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                            100% synced with People I Need to Pay in the Receivables &amp; Payables tab.
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setActiveSection('people')}
-                            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
-                          >
-                            <span>Open Receivables &amp; Payables</span>
-                            <ArrowRight className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            data-testid="close-expanded-summary-panel"
-                            onClick={() => setExpandedSummaryCard(null)}
-                            className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 cursor-pointer"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                            <span>Close</span>
-                          </button>
-                        </div>
-                      </div>
+                        )}
 
-                      {dashboardSummaryCards.livePayableRecords.length === 0 ? (
-                        <div className="p-6 text-center text-xs text-slate-500 dark:text-slate-400 rounded-xl bg-slate-50 dark:bg-slate-800/50">
-                          You have zero pending payables owed to people or entities right now.
-                        </div>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse text-xs">
-                            <thead>
-                              <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
-                                <th className="py-2 pr-3">Person / Entity</th>
-                                <th className="py-2 px-3">Payable Description</th>
-                                <th className="py-2 px-3">Date / Due</th>
-                                <th className="py-2 px-3">Category</th>
-                                <th className="py-2 px-3 text-right">Total</th>
-                                <th className="py-2 px-3 text-right">Paid So Far</th>
-                                <th className="py-2 pl-3 text-right">Remaining Payable Due</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
-                              {dashboardSummaryCards.livePayableRecords.map((rec) => (
-                                <tr key={`${rec.personId}-${rec.id}`}>
-                                  <td className="py-2.5 pr-3 font-bold text-slate-900 dark:text-white">
-                                    {rec.personName}
-                                  </td>
-                                  <td className="py-2.5 px-3 text-slate-700 dark:text-slate-300">
-                                    {rec.title}
-                                  </td>
-                                  <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">
-                                    {rec.date}
-                                    {rec.dueDate && rec.dueDate !== rec.date
-                                      ? ` · Due ${rec.dueDate}`
-                                      : ''}
-                                  </td>
-                                  <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400">
-                                    {rec.category}
-                                  </td>
-                                  <td className="py-2.5 px-3 text-right font-mono text-slate-700 dark:text-slate-300">
-                                    {currency}
-                                    {rec.totalAmount.toLocaleString()}
-                                  </td>
-                                  <td className="py-2.5 px-3 text-right font-mono text-emerald-600 dark:text-emerald-400">
-                                    {currency}
-                                    {rec.settledAmount.toLocaleString()}
-                                  </td>
-                                  <td className="py-2.5 pl-3 text-right font-mono font-extrabold text-amber-600 dark:text-amber-400">
-                                    -{currency}
-                                    {rec.remainingAmount.toLocaleString()}
-                                  </td>
+                        {filteredReceivables.length === 0 ? (
+                          <div className="p-6 text-center text-xs text-slate-500 dark:text-slate-400 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+                            No pending receivable records owed to you right now.
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse text-xs">
+                              <thead>
+                                <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
+                                  <th className="py-2 pr-3">Person / Entity</th>
+                                  <th className="py-2 px-3">Item Description</th>
+                                  <th className="py-2 px-3">Date / Due</th>
+                                  <th className="py-2 px-3">Category</th>
+                                  <th className="py-2 px-3 text-right">Total</th>
+                                  <th className="py-2 px-3 text-right">Settled</th>
+                                  <th className="py-2 px-3 text-right">Remaining Receivable</th>
+                                  <th className="py-2 pl-3 text-right">Actions</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
+                                {filteredReceivables.map((rec) => (
+                                  <tr key={`${rec.personId}-${rec.id}`}>
+                                    <td className="py-2.5 pr-3 font-bold text-slate-900 dark:text-white">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (rec.personId) {
+                                            setSelectedPeoplePersonId(rec.personId);
+                                          }
+                                          setActiveSection('people');
+                                        }}
+                                        className="text-sky-700 dark:text-sky-300 hover:underline font-extrabold cursor-pointer text-left"
+                                      >
+                                        {rec.personName}
+                                      </button>
+                                    </td>
+                                    <td className="py-2.5 px-3 text-slate-700 dark:text-slate-300">
+                                      {rec.title}
+                                    </td>
+                                    <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">
+                                      {rec.date}
+                                      {rec.dueDate && rec.dueDate !== rec.date
+                                        ? ` · Due ${rec.dueDate}`
+                                        : ''}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400">
+                                      {rec.category}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right font-mono text-slate-700 dark:text-slate-300">
+                                      {currency}
+                                      {rec.totalAmount.toLocaleString()}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right font-mono text-emerald-600 dark:text-emerald-400">
+                                      {currency}
+                                      {rec.settledAmount.toLocaleString()}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right font-mono font-extrabold text-sky-600 dark:text-sky-400">
+                                      +{currency}
+                                      {rec.remainingAmount.toLocaleString()}
+                                    </td>
+                                    <td className="py-2.5 pl-3 text-right whitespace-nowrap">
+                                      <div className="inline-flex items-center gap-1.5">
+                                        {!isAccountOnHold && (
+                                          <button
+                                            type="button"
+                                            data-testid={`dashboard-settle-receivable-btn-${rec.id}`}
+                                            onClick={() => {
+                                              void handleAdjustRecordSettlementStatus({
+                                                recordId: rec.id,
+                                                sourceType: rec.sourceType,
+                                                targetStatus: 'settled',
+                                                totalAmount: rec.totalAmount,
+                                                newSettledAmount: rec.totalAmount,
+                                                previousSettledAmount: rec.settledAmount,
+                                                selectedAccountId:
+                                                  savingsAndWalletAccounts[0]?.id ||
+                                                  vault.accounts[0]?.id,
+                                                personId: rec.personId || '',
+                                                title: rec.title,
+                                                isPayable: false,
+                                              });
+                                              triggerFeedback(
+                                                `Marked "${rec.title}" as Settled (+${currency}${rec.remainingAmount.toLocaleString()})`,
+                                                'success',
+                                                'toast'
+                                              );
+                                            }}
+                                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold cursor-pointer"
+                                          >
+                                            Mark Received
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          data-testid={`dashboard-open-receivable-person-btn-${rec.id}`}
+                                          onClick={() => {
+                                            if (rec.personId) {
+                                              setSelectedPeoplePersonId(rec.personId);
+                                            }
+                                            setActiveSection('people');
+                                          }}
+                                          className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-sky-500/50 text-slate-700 dark:text-slate-300 text-[11px] font-semibold cursor-pointer"
+                                        >
+                                          Open Ledger
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
-                  {/* 4. EXPANDED VIEW FOR THE LOANS (Active Structured EMI & Open-Tenure Loans Breakdown) */}
+                  {/* 3. EXPANDED VIEW FOR THE MONEY I OWE (Interactive Synced Live Payable Records) */}
+                  {expandedSummaryCard === 'moneyIOwe' && (() => {
+                    const allPayables = dashboardSummaryCards.livePayableRecords;
+                    const personMap = new Map<string, { id: string; name: string; due: number; count: number }>();
+                    for (const rec of allPayables) {
+                      const pid = rec.personId || rec.personName;
+                      const prev = personMap.get(pid) || {
+                        id: rec.personId || '',
+                        name: rec.personName,
+                        due: 0,
+                        count: 0,
+                      };
+                      prev.due = Math.round((prev.due + rec.remainingAmount) * 100) / 100;
+                      prev.count += 1;
+                      personMap.set(pid, prev);
+                    }
+                    const personPills = Array.from(personMap.values());
+                    const filteredPayables =
+                      dashboardPayablePersonFilter === 'ALL'
+                        ? allPayables
+                        : allPayables.filter(
+                            (r) =>
+                              (r.personId || r.personName) === dashboardPayablePersonFilter
+                          );
+
+                    return (
+                      <div
+                        data-testid="expanded-panel-money-i-owe"
+                        className="space-y-3.5"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-extrabold uppercase tracking-wider">
+                                Live Interactive Synced Ledger
+                              </span>
+                              <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                                The Money I Owe — Live Quick Payable Records (
+                                {allPayables.length})
+                              </h3>
+                            </div>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                              Fetched live from People I Need to Pay in Receivables &amp; Payables. Filter by person, mark paid directly, or open ledger.
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              data-testid="money-i-owe-open-people-btn"
+                              onClick={() => {
+                                if (dashboardPayablePersonFilter !== 'ALL') {
+                                  setSelectedPeoplePersonId(dashboardPayablePersonFilter);
+                                }
+                                setActiveSection('people');
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>Open Receivables &amp; Payables</span>
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="close-expanded-summary-panel"
+                              onClick={() => setExpandedSummaryCard(null)}
+                              className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              <span>Close</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {personPills.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setDashboardPayablePersonFilter('ALL')}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                                dashboardPayablePersonFilter === 'ALL'
+                                  ? 'bg-amber-600 text-white border-amber-600'
+                                  : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                              }`}
+                            >
+                              All People ({allPayables.length})
+                            </button>
+                            {personPills.map((p) => {
+                              const key = p.id || p.name;
+                              const isSelected = dashboardPayablePersonFilter === key;
+                              return (
+                                <button
+                                  key={key}
+                                  type="button"
+                                  data-testid={`dashboard-payable-person-pill-${key}`}
+                                  onClick={() =>
+                                    setDashboardPayablePersonFilter(isSelected ? 'ALL' : key)
+                                  }
+                                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer flex items-center gap-1.5 ${
+                                    isSelected
+                                      ? 'bg-amber-600 text-white border-amber-600'
+                                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-amber-500/50'
+                                  }`}
+                                >
+                                  <span>{p.name}</span>
+                                  <span className="font-mono text-[11px] opacity-90">
+                                    -{currency}
+                                    {p.due.toLocaleString()}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {filteredPayables.length === 0 ? (
+                          <div className="p-6 text-center text-xs text-slate-500 dark:text-slate-400 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+                            You have zero pending payables owed to people or entities right now.
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse text-xs">
+                              <thead>
+                                <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase text-slate-500 dark:text-slate-400">
+                                  <th className="py-2 pr-3">Person / Entity</th>
+                                  <th className="py-2 px-3">Payable Description</th>
+                                  <th className="py-2 px-3">Date / Due</th>
+                                  <th className="py-2 px-3">Category</th>
+                                  <th className="py-2 px-3 text-right">Total</th>
+                                  <th className="py-2 px-3 text-right">Paid So Far</th>
+                                  <th className="py-2 px-3 text-right">Remaining Payable Due</th>
+                                  <th className="py-2 pl-3 text-right">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
+                                {filteredPayables.map((rec) => (
+                                  <tr key={`${rec.personId}-${rec.id}`}>
+                                    <td className="py-2.5 pr-3 font-bold text-slate-900 dark:text-white">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (rec.personId) {
+                                            setSelectedPeoplePersonId(rec.personId);
+                                          }
+                                          setActiveSection('people');
+                                        }}
+                                        className="text-amber-700 dark:text-amber-300 hover:underline font-extrabold cursor-pointer text-left"
+                                      >
+                                        {rec.personName}
+                                      </button>
+                                    </td>
+                                    <td className="py-2.5 px-3 text-slate-700 dark:text-slate-300">
+                                      {rec.title}
+                                    </td>
+                                    <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">
+                                      {rec.date}
+                                      {rec.dueDate && rec.dueDate !== rec.date
+                                        ? ` · Due ${rec.dueDate}`
+                                        : ''}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400">
+                                      {rec.category}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right font-mono text-slate-700 dark:text-slate-300">
+                                      {currency}
+                                      {rec.totalAmount.toLocaleString()}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right font-mono text-emerald-600 dark:text-emerald-400">
+                                      {currency}
+                                      {rec.settledAmount.toLocaleString()}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right font-mono font-extrabold text-amber-600 dark:text-amber-400">
+                                      -{currency}
+                                      {rec.remainingAmount.toLocaleString()}
+                                    </td>
+                                    <td className="py-2.5 pl-3 text-right whitespace-nowrap">
+                                      <div className="inline-flex items-center gap-1.5">
+                                        {!isAccountOnHold && (
+                                          <button
+                                            type="button"
+                                            data-testid={`dashboard-settle-payable-btn-${rec.id}`}
+                                            onClick={() => {
+                                              void handleAdjustRecordSettlementStatus({
+                                                recordId: rec.id,
+                                                sourceType: rec.sourceType,
+                                                targetStatus: 'settled',
+                                                totalAmount: rec.totalAmount,
+                                                newSettledAmount: rec.totalAmount,
+                                                previousSettledAmount: rec.settledAmount,
+                                                selectedAccountId:
+                                                  savingsAndWalletAccounts[0]?.id ||
+                                                  vault.accounts[0]?.id,
+                                                personId: rec.personId || '',
+                                                title: rec.title,
+                                                isPayable: true,
+                                              });
+                                              triggerFeedback(
+                                                `Marked Payable "${rec.title}" as Paid (-${currency}${rec.remainingAmount.toLocaleString()})`,
+                                                'success',
+                                                'toast'
+                                              );
+                                            }}
+                                            className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold cursor-pointer"
+                                          >
+                                            Mark Paid
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          data-testid={`dashboard-open-payable-person-btn-${rec.id}`}
+                                          onClick={() => {
+                                            if (rec.personId) {
+                                              setSelectedPeoplePersonId(rec.personId);
+                                            }
+                                            setActiveSection('people');
+                                          }}
+                                          className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-amber-500/50 text-slate-700 dark:text-slate-300 text-[11px] font-semibold cursor-pointer"
+                                        >
+                                          Open Ledger
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* 4. EXPANDED VIEW FOR THE LOANS (2-Column Side-by-Side Split: Left = Legal/Bank Agreement Loans | Right = Personal & Market Loans) */}
                   {expandedSummaryCard === 'theLoans' && (
                     <div
                       data-testid="expanded-panel-the-loans"
-                      className="space-y-3"
+                      className="space-y-4"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="px-2 py-0.5 rounded-md bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 text-[10px] font-extrabold uppercase tracking-wider">
-                              View-Only Loan Summary
+                              Synced 2-Section Loan Breakdown
                             </span>
                             <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
-                              Active Loans Breakdown ({activeLoansOnDashboard.length})
+                              Active Loans Breakdown ({dashboardSummaryCards.totalActiveLoansCount})
                             </h3>
                           </div>
                           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                            Structured EMI Loans: {currency}
-                            {dashboardSummaryCards.properEmiLoansBalance.toLocaleString()} ·
-                            Open-Tenure Loans: {currency}
+                            1. Legal &amp; Bank Agreement Loans ({dashboardSummaryCards.legalAgreementLoansCount}):{' '}
+                            {currency}
+                            {dashboardSummaryCards.properEmiLoansBalance.toLocaleString()} · 2. Personal &amp; Market Loans ({dashboardSummaryCards.personalMarketLoansCount}):{' '}
+                            {currency}
                             {dashboardSummaryCards.flexiblePersonOrgLoansBalance.toLocaleString()}
                           </p>
                         </div>
@@ -4678,79 +5046,234 @@ export default function App() {
                         </div>
                       </div>
 
-                      {activeLoansOnDashboard.length === 0 ? (
-                        <div className="p-6 text-center text-xs text-slate-500 dark:text-slate-400 rounded-xl bg-slate-50 dark:bg-slate-800/50">
-                          No active loans in progress.
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-                          {activeLoansOnDashboard.map((loan) => {
-                            const schedule = calculateLoanAmortizationSchedule(loan);
-                            const isOpenTenure = loan.loanType === 'person_org_no_tenure';
-                            return (
+                      {/* 2-COLUMN SIDE-BY-SIDE VIEW: LEFT = LEGAL / BANK / COMPANY LOANS | RIGHT = PERSONAL & MARKET LOANS */}
+                      <div
+                        data-testid="expanded-loans-two-columns"
+                        className="grid grid-cols-1 lg:grid-cols-12 gap-4"
+                      >
+                        {/* LEFT SIDE: LEGAL & BANK AGREEMENT LOANS (Structured Details) */}
+                        <div
+                          data-testid="expanded-loans-left-legal"
+                          className="lg:col-span-6 rounded-2xl border border-indigo-500/30 bg-indigo-50/40 dark:bg-indigo-950/20 p-4 space-y-3"
+                        >
+                          <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-indigo-500/20">
+                            <div>
+                              <div className="text-xs font-extrabold uppercase tracking-wider text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
+                                <Landmark className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                                <span>
+                                  1. Legal &amp; Bank Agreement Loans (
+                                  {dashboardSummaryCards.legalAgreementLoansCount})
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                Signed-agreement Bank, Credit Card, NBFC &amp; Company Loans
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-300">
+                                Remaining Balance
+                              </div>
                               <div
-                                key={loan.id}
-                                className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 space-y-2 text-xs"
+                                data-testid="expanded-left-legal-loans-total"
+                                className="text-sm font-extrabold font-mono text-indigo-700 dark:text-indigo-300"
                               >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div>
-                                    <div className="font-extrabold text-slate-900 dark:text-white break-words">
-                                      {loan.name}
+                                {currency}
+                                {dashboardSummaryCards.properEmiLoansBalance.toLocaleString(
+                                  undefined,
+                                  {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  }
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {dashboardSummaryCards.legalAgreementLoans.length === 0 ? (
+                            <div className="p-5 text-center text-xs text-slate-500 dark:text-slate-400 rounded-xl border border-dashed border-indigo-300 dark:border-indigo-900">
+                              No active Bank, Credit Card, or Company agreement loans.
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {dashboardSummaryCards.legalAgreementLoans.map((item) => (
+                                <div
+                                  key={item.id}
+                                  data-testid={`expanded-legal-loan-card-${item.id}`}
+                                  className="p-3.5 rounded-xl border border-indigo-500/25 bg-white dark:bg-slate-900 space-y-2 text-xs shadow-xs"
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div>
+                                      <div className="font-extrabold text-slate-900 dark:text-white break-words">
+                                        {item.name}
+                                      </div>
+                                      <div className="text-[11px] text-slate-500">
+                                        {item.lenderOrCategoryLabel}
+                                      </div>
                                     </div>
-                                    <div className="text-[11px] text-slate-500">
-                                      {loan.lenderName ||
-                                        resolveFlexibleLabel(loan.category, loan.customCategory)}
-                                    </div>
-                                  </div>
-                                  <span
-                                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                      isOpenTenure
-                                        ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
-                                        : 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300'
-                                    }`}
-                                  >
-                                    {isOpenTenure ? 'Open-Tenure' : 'Structured EMI'}
-                                  </span>
-                                </div>
-                                <div className="pt-2 border-t border-slate-200/70 dark:border-slate-700 space-y-1">
-                                  <div className="flex justify-between">
-                                    <span className="text-slate-500">Principal:</span>
-                                    <span className="font-mono font-semibold">
-                                      {currency}
-                                      {loan.principalAmount.toLocaleString()}
+                                    <span className="px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold shrink-0">
+                                      {item.subTypeBadge}
                                     </span>
                                   </div>
-                                  {!isOpenTenure && (
+                                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1">
                                     <div className="flex justify-between">
-                                      <span className="text-slate-500">Monthly EMI:</span>
-                                      <span className="font-mono font-semibold">
-                                        {currency}
-                                        {Math.round(schedule.scheduledMonthlyEmi).toLocaleString()}
+                                      <span className="text-slate-500">Status:</span>
+                                      <span className="font-bold text-slate-800 dark:text-slate-200">
+                                        {item.status}
                                       </span>
                                     </div>
-                                  )}
-                                  <div className="flex justify-between">
-                                    <span className="text-slate-500">Paid So Far:</span>
-                                    <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                                      {currency}
-                                      {schedule.totalAmountPaidSoFar.toLocaleString()}
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
-                                    <span className="font-bold text-slate-800 dark:text-slate-200">
-                                      Remaining Due:
-                                    </span>
-                                    <span className="font-mono font-extrabold text-indigo-600 dark:text-indigo-400">
-                                      {currency}
-                                      {schedule.remainingBalance.toLocaleString()}
-                                    </span>
+                                    <div className="flex justify-between">
+                                      <span className="text-slate-500">Principal / Sanctioned:</span>
+                                      <span className="font-mono font-semibold">
+                                        {currency}
+                                        {item.principalAmount.toLocaleString()}
+                                      </span>
+                                    </div>
+                                    {item.monthlyEmi > 0 && (
+                                      <div className="flex justify-between">
+                                        <span className="text-slate-500">Structured EMI:</span>
+                                        <span className="font-mono font-semibold text-indigo-600 dark:text-indigo-400">
+                                          {currency}
+                                          {Math.round(item.monthlyEmi).toLocaleString()}/mo
+                                        </span>
+                                      </div>
+                                    )}
+                                    {item.interestRateAnnual > 0 && (
+                                      <div className="flex justify-between">
+                                        <span className="text-slate-500">Interest Rate:</span>
+                                        <span className="font-mono font-semibold">
+                                          {item.interestRateAnnual}% p.a.
+                                        </span>
+                                      </div>
+                                    )}
+                                    <div className="flex justify-between">
+                                      <span className="text-slate-500">Paid So Far:</span>
+                                      <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                                        {currency}
+                                        {item.totalAmountPaidSoFar.toLocaleString()}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between pt-1 border-t border-slate-100 dark:border-slate-800">
+                                      <span className="font-bold text-slate-800 dark:text-slate-200">
+                                        Remaining Due:
+                                      </span>
+                                      <span className="font-mono font-extrabold text-indigo-600 dark:text-indigo-400">
+                                        {currency}
+                                        {item.remainingBalance.toLocaleString(undefined, {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2,
+                                        })}
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            );
-                          })}
+                              ))}
+                            </div>
+                          )}
                         </div>
-                      )}
+
+                        {/* RIGHT SIDE: PERSONAL & MARKET LOANS (Unstructured Details) */}
+                        <div
+                          data-testid="expanded-loans-right-personal"
+                          className="lg:col-span-6 rounded-2xl border-2 border-amber-500/35 bg-amber-50/40 dark:bg-amber-950/20 p-4 space-y-3"
+                        >
+                          <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-amber-500/20">
+                            <div>
+                              <div className="text-xs font-extrabold uppercase tracking-wider text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                                <Users className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                                <span>
+                                  2. Personal &amp; Market Loans (
+                                  {dashboardSummaryCards.personalMarketLoansCount})
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-amber-800/80 dark:text-amber-300/80">
+                                Unstructured / Open-Tenure Personal or Market Borrowings
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                                Remaining Balance
+                              </div>
+                              <div
+                                data-testid="expanded-right-personal-loans-total"
+                                className="text-sm font-extrabold font-mono text-amber-700 dark:text-amber-300"
+                              >
+                                {currency}
+                                {dashboardSummaryCards.flexiblePersonOrgLoansBalance.toLocaleString(
+                                  undefined,
+                                  {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  }
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {dashboardSummaryCards.personalMarketLoans.length === 0 ? (
+                            <div className="p-5 text-center text-xs text-amber-800/80 dark:text-amber-300/80 rounded-xl border border-dashed border-amber-400/50 dark:border-amber-800">
+                              No active Personal or Market open-tenure loans.
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {dashboardSummaryCards.personalMarketLoans.map((item) => (
+                                <div
+                                  key={item.id}
+                                  data-testid={`expanded-personal-loan-card-${item.id}`}
+                                  className="p-3.5 rounded-xl border-2 border-amber-500/35 bg-white dark:bg-slate-900 space-y-2 text-xs shadow-xs"
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div>
+                                      <div className="font-extrabold text-slate-900 dark:text-white break-words">
+                                        {item.name}
+                                      </div>
+                                      <div className="text-[11px] text-amber-700 dark:text-amber-300">
+                                        {item.lenderOrCategoryLabel}
+                                      </div>
+                                    </div>
+                                    <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-800 dark:text-amber-300 text-[10px] font-bold shrink-0">
+                                      Unstructured
+                                    </span>
+                                  </div>
+                                  <div className="pt-2 border-t border-amber-500/20 space-y-1">
+                                    <div className="flex justify-between">
+                                      <span className="text-slate-500">Tenure Structure:</span>
+                                      <span className="font-bold text-amber-700 dark:text-amber-300">
+                                        Flexible / Open-Tenure
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-slate-500">Borrowed Principal:</span>
+                                      <span className="font-mono font-semibold">
+                                        {currency}
+                                        {item.principalAmount.toLocaleString()}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-slate-500">Repaid So Far:</span>
+                                      <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                                        {currency}
+                                        {item.totalAmountPaidSoFar.toLocaleString()}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between pt-1 border-t border-amber-500/20">
+                                      <span className="font-bold text-slate-800 dark:text-slate-200">
+                                        Remaining Due:
+                                      </span>
+                                      <span className="font-mono font-extrabold text-amber-600 dark:text-amber-400">
+                                        {currency}
+                                        {item.remainingBalance.toLocaleString(undefined, {
+                                          minimumFractionDigits: 2,
+                                          maximumFractionDigits: 2,
+                                        })}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   )}
 
@@ -5545,6 +6068,7 @@ export default function App() {
               readOnlyMode={isAccountOnHold}
               userPasswordHash={currentUser.passwordHash}
               pdfHeaderConfig={pdfHeaderConfig}
+              initialSelectedPersonId={selectedPeoplePersonId}
               onAddPerson={handleAddPerson}
               onDeletePerson={handleDeletePerson}
               onBlockPerson={handleBlockPerson}

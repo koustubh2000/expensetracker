@@ -107,7 +107,12 @@ function cloudVaultMirrorPlugin(): Plugin {
                   if (!inc || !inc.id || isPollutedTestUser(inc)) continue;
                   if (inc.id !== 'user-admin' && deletedSet.has(inc.id)) continue;
                   const prev = byId.get(inc.id);
-                  byId.set(inc.id, prev ? pickNewerMirrorUser(prev, inc) : inc);
+                  byId.set(inc.id, {
+                    ...(prev || {}),
+                    ...inc,
+                    avatarThumbnailDataUrl:
+                      inc.avatarThumbnailDataUrl || prev?.avatarThumbnailDataUrl,
+                  });
                 }
                 store.users = Array.from(byId.values());
               }

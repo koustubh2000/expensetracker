@@ -1757,5 +1757,106 @@ test('Strict Single-Password Authentication: admin rejects alternate passwords a
   assert.equal(cleanNextLogin.priorFailedAttemptsCount, 0);
 });
 
+import { calculateUnifiedLoansOverview } from './financeRules';
+
+test('calculateUnifiedLoansOverview and calculateDashboardSummaryCards sync standalone Loan Accounts, deduplicate connected LoanRecords, split Legal vs Personal/Market loans, and sync Receivables/Payables', () => {
+  const accounts: WalletAccount[] = [
+    {
+      id: 'acc-sav-1',
+      name: 'Bank of Baroda',
+      type: 'Bank Account',
+      currency: '₹',
+      initialBalance: 10000,
+      color: '#c2410c',
+      includeInNetWorth: true,
+    },
+    {
+      id: 'acc-loan-standalone',
+      name: 'Bank of India Loan Account',
+      type: 'Loan Account',
+      currency: '₹',
+      initialBalance: 0,
+      loanStatus: 'In Progress',
+      sanctionedLoanAmount: 250000,
+      currentRemainingLoanAmount: 180000,
+      bankGivenEmi: 8500,
+      color: '#be123c',
+      includeInNetWorth: true,
+    },
+    {
+      id: 'acc-loan-connected',
+      name: 'HDFC Car Loan Account',
+      type: 'Loan Account',
+      currency: '₹',
+      initialBalance: 0,
+      loanStatus: 'In Progress',
+      sanctionedLoanAmount: 500000,
+      currentRemainingLoanAmount: 420000,
+      bankGivenEmi: 14500,
+      connectedLoanRecordId: 'loan-hdfc-1',
+      color: '#1d4ed8',
+      includeInNetWorth: true,
+    },
+  ];
+
+  const loans: LoanRecord[] = [
+    {
+      id: 'loan-hdfc-1',
+      name: 'HDFC Car Loan Schedule',
+      loanType: 'proper_emi',
+      category: 'Car Loan',
+      principalAmount: 500000,
+      interestRateAnnual: 9.0,
+      tenureMonths: 48,
+      startDate: '2026-01-01',
+      linkedAccountId: 'acc-sav-1',
+      connectedLoanAccountId: 'acc-loan-connected',
+      status: 'In Progress',
+      currentRemainingAmount: 420000,
+      customSuggestedEmi: 14500,
+      payments: [],
+      createdAt: '2026-01-01',
+    },
+    {
+      id: 'loan-personal-market-1',
+      name: 'Ramesh Market Hand Loan',
+      loanType: 'person_org_no_tenure',
+      lenderName: 'Ramesh Traders',
+      category: 'Personal Loan',
+      principalAmount: 75000,
+      interestRateAnnual: 0,
+      tenureMonths: 12,
+      startDate: '2026-05-01',
+      linkedAccountId: 'acc-sav-1',
+      status: 'In Progress',
+      totalAmountAlreadyPaid: 25000,
+      payments: [],
+      createdAt: '2026-05-01',
+    },
+  ];
+
+  const unified = calculateUnifiedLoansOverview(accounts, loans, []);
+  // Total active loans = 3 (1 connected HDFC Car Loan deduplicated + 1 standalone Bank of India Loan Account + 1 Personal Market Loan)
+  assert.equal(unified.totalActiveLoansCount, 3);
+  assert.equal(unified.legalAgreementCount, 2);
+  assert.equal(unified.personalMarketCount, 1);
+  assert.equal(unified.unlinkedLoanAccounts.length, 1);
+  assert.equal(unified.unlinkedLoanAccounts[0].id, 'acc-loan-standalone');
+  assert.equal(unified.properEmiLoansBalance, 600000); // 420000 + 180000
+  assert.equal(unified.flexiblePersonOrgLoansBalance, 50000); // 75000 - 25000
+  assert.equal(unified.theLoansActiveBalance, 650000);
+
+  const summary = calculateDashboardSummaryCards(accounts, [], [], loans, [], []);
+  // Liquid savings balance excludes Loan Account cards
+  assert.equal(summary.totalCountedInAllMyAccounts, 10000);
+  assert.equal(summary.totalActiveLoansCount, 3);
+  assert.equal(summary.legalAgreementLoansCount, 2);
+  assert.equal(summary.personalMarketLoansCount, 1);
+  assert.equal(summary.properEmiLoansBalance, 600000);
+  assert.equal(summary.flexiblePersonOrgLoansBalance, 50000);
+  assert.equal(summary.theLoansActiveBalance, 650000);
+});
+
+
 
 

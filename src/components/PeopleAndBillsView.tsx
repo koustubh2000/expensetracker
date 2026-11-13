@@ -100,8 +100,14 @@ interface PeopleAndBillsViewProps {
   onDeleteExpectedItem: (itemId: string) => void;
   onDeleteTransaction: (txId: string) => void;
   onUnlinkTransactionFromPerson?: (txId: string) => void;
+  initialSelectedPersonId?: string;
   onEditTransaction?: (tx: TransactionRecord) => void;
-  onLinkTransactionToPerson: (txId: string, personId: string, dueDate: string) => void;
+  onLinkTransactionToPerson: (
+    txId: string,
+    personId: string,
+    dueDate: string,
+    direction?: ExpectedItem['direction']
+  ) => void;
   onSettleExpectedItem: (itemId: string, amountPaid: number, depositAccountId?: string) => void;
   onAdjustRecordSettlementStatus?: (payload: RecordSettlementAdjustmentPayload) => void;
   onAttachProofToRecord?: (
@@ -162,6 +168,7 @@ export const PeopleAndBillsView: React.FC<PeopleAndBillsViewProps> = ({
   onDeleteExpectedItem,
   onDeleteTransaction,
   onUnlinkTransactionFromPerson,
+  initialSelectedPersonId,
   onEditTransaction,
   onLinkTransactionToPerson,
   onSettleExpectedItem,
@@ -173,8 +180,16 @@ export const PeopleAndBillsView: React.FC<PeopleAndBillsViewProps> = ({
   const blockedPeople = people.filter((p) => p.isBlocked);
 
   const [selectedPersonId, setSelectedPersonId] = useState<string>(
-    activePeople[0]?.id || people[0]?.id || ''
+    initialSelectedPersonId || activePeople[0]?.id || people[0]?.id || ''
   );
+
+  React.useEffect(() => {
+    if (initialSelectedPersonId && people.some((p) => p.id === initialSelectedPersonId)) {
+      setSelectedPersonId(initialSelectedPersonId);
+      setPersonLedgerTab('live');
+    }
+  }, [initialSelectedPersonId, people]);
+
   const [billModalPerson, setBillModalPerson] = useState<PersonProfile | null>(null);
 
   // Active Person View Tab: 'live' vs 'history'
@@ -439,7 +454,7 @@ export const PeopleAndBillsView: React.FC<PeopleAndBillsViewProps> = ({
     if (readOnlyMode) return;
     const txIdToUse = selectedRecordTxId || transactions[0]?.id;
     if (!activePerson || !txIdToUse) return;
-    onLinkTransactionToPerson(txIdToUse, activePerson.id, expDueDate);
+    onLinkTransactionToPerson(txIdToUse, activePerson.id, expDueDate, expDirection);
     setShowAddExpectedForm(false);
     setFeedback(`Linked transaction record to ${activePerson.name} for billing & tracking.`);
     onTriggerFeedback?.('Record Linked to Bill Successfully', 'success');
@@ -1831,7 +1846,6 @@ export const PeopleAndBillsView: React.FC<PeopleAndBillsViewProps> = ({
                               type="button"
                               data-testid="quick-preset-receivable-btn"
                               onClick={() => {
-                                setEntryMode('manual');
                                 setExpDirection('expecting_from');
                               }}
                               className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold border cursor-pointer ${
@@ -1846,7 +1860,6 @@ export const PeopleAndBillsView: React.FC<PeopleAndBillsViewProps> = ({
                               type="button"
                               data-testid="quick-preset-payable-btn"
                               onClick={() => {
-                                setEntryMode('manual');
                                 setExpDirection('borrowed_from');
                               }}
                               className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold border cursor-pointer ${
@@ -2020,7 +2033,7 @@ export const PeopleAndBillsView: React.FC<PeopleAndBillsViewProps> = ({
                         ) : (
                           <form onSubmit={handleLinkRecordSubmit} className="space-y-3">
                             <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
-                              <div className="sm:col-span-7">
+                              <div className="sm:col-span-5">
                                 <label
                                   htmlFor="select-existing-tx"
                                   className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
@@ -2047,6 +2060,32 @@ export const PeopleAndBillsView: React.FC<PeopleAndBillsViewProps> = ({
                               </div>
                               <div className="sm:col-span-3">
                                 <label
+                                  htmlFor="link-direction-select"
+                                  className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                                >
+                                  Tracking Type
+                                </label>
+                                <select
+                                  id="link-direction-select"
+                                  value={expDirection}
+                                  onChange={(e) =>
+                                    setExpDirection(e.target.value as ExpectedItem['direction'])
+                                  }
+                                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+                                >
+                                  <option value="expecting_from">
+                                    Expected Receivable (Owed to Me)
+                                  </option>
+                                  <option value="lent_to">
+                                    Money Lent (Receivable)
+                                  </option>
+                                  <option value="borrowed_from">
+                                    Quick Payable (People I Need to Pay)
+                                  </option>
+                                </select>
+                              </div>
+                              <div className="sm:col-span-2">
+                                <label
                                   htmlFor="link-due-date"
                                   className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
                                 >
@@ -2064,9 +2103,15 @@ export const PeopleAndBillsView: React.FC<PeopleAndBillsViewProps> = ({
                                 <button
                                   type="submit"
                                   disabled={transactions.length === 0}
-                                  className={`w-full px-3 py-2 rounded-lg text-xs font-semibold cursor-pointer ${accentBtnClass}`}
+                                  className={`w-full px-3 py-2 rounded-lg text-xs font-semibold cursor-pointer ${
+                                    expDirection === 'borrowed_from'
+                                      ? 'bg-rose-600 hover:bg-rose-500 text-white'
+                                      : accentBtnClass
+                                  }`}
                                 >
-                                  Link Record
+                                  {expDirection === 'borrowed_from'
+                                    ? 'Link Payable'
+                                    : 'Link Record'}
                                 </button>
                               </div>
                             </div>

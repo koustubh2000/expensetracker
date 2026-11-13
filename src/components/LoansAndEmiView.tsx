@@ -13,6 +13,7 @@ import {
   calculateAccountBalance,
   calculateLoanAmortizationSchedule,
   calculateStandardMonthlyEmi,
+  calculateUnifiedLoansOverview,
   LOAN_CATEGORIES,
   verifySecretAgainstStoredHash,
 } from '../utils/financeRules';
@@ -134,6 +135,12 @@ export const LoansAndEmiView: React.FC<LoansAndEmiViewProps> = ({
   const loanAccountCards = useMemo(
     () => accounts.filter((a) => a.type === 'Loan Account'),
     [accounts]
+  );
+
+  // Unified Loans Overview synced 100% with Dashboard Top Loan Section and Dashboard "THE LOANS" Card
+  const unifiedLoansOverview = useMemo(
+    () => calculateUnifiedLoansOverview(accounts, loans, transactions),
+    [accounts, loans, transactions]
   );
 
   // Account-Linked EMI Payment Confirmation Modal State
@@ -1126,7 +1133,7 @@ export const LoansAndEmiView: React.FC<LoansAndEmiViewProps> = ({
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
               }`}
             >
-              Active Loans ({activeMainLoans.length})
+              Active Loans ({unifiedLoansOverview.totalActiveLoansCount})
             </button>
             <button
               type="button"
@@ -1178,6 +1185,119 @@ export const LoansAndEmiView: React.FC<LoansAndEmiViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* UNIFIED LOANS SYNC STRIP (100% Matched with Dashboard Loan Section & "THE LOANS" Card) */}
+      <div
+        data-testid="loans-unified-sync-strip"
+        className="grid grid-cols-1 md:grid-cols-3 gap-3"
+      >
+        <div className="p-3.5 rounded-2xl border border-indigo-500/30 bg-indigo-50/70 dark:bg-indigo-950/30 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-600 dark:text-indigo-300">
+              Total Active Loans (Synced with Dashboard)
+            </div>
+            <div
+              data-testid="loans-tab-total-active-balance"
+              className="text-xl font-extrabold font-mono tabular-nums text-indigo-950 dark:text-white mt-0.5"
+            >
+              {formatMoney(unifiedLoansOverview.theLoansActiveBalance)}
+            </div>
+          </div>
+          <span className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-[11px] font-extrabold">
+            {unifiedLoansOverview.totalActiveLoansCount} Active
+          </span>
+        </div>
+
+        <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+              1. Legal &amp; Bank Agreement Loans ({unifiedLoansOverview.legalAgreementCount})
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              Bank, Credit Card &amp; Company Signed Loans
+            </div>
+          </div>
+          <div
+            data-testid="loans-tab-legal-balance"
+            className="text-base font-extrabold font-mono tabular-nums text-slate-900 dark:text-white"
+          >
+            {formatMoney(unifiedLoansOverview.properEmiLoansBalance)}
+          </div>
+        </div>
+
+        <div className="p-3.5 rounded-2xl border border-amber-500/30 bg-amber-50/60 dark:bg-amber-950/20 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-extrabold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+              2. Personal &amp; Market Loans ({unifiedLoansOverview.personalMarketCount})
+            </div>
+            <div className="text-[11px] text-amber-700/80 dark:text-amber-300/80">
+              Person / Market Open-Tenure Loans
+            </div>
+          </div>
+          <div
+            data-testid="loans-tab-personal-market-balance"
+            className="text-base font-extrabold font-mono tabular-nums text-amber-800 dark:text-amber-300"
+          >
+            {formatMoney(unifiedLoansOverview.flexiblePersonOrgLoansBalance)}
+          </div>
+        </div>
+      </div>
+
+      {/* UNLINKED LOAN ACCOUNT CARDS FROM ACCOUNTS TAB (Ready to Connect or Track) */}
+      {unifiedLoansOverview.unlinkedLoanAccounts.length > 0 && (
+        <div
+          data-testid="unlinked-loan-accounts-banner"
+          className="p-4 rounded-2xl border border-indigo-500/30 bg-indigo-500/5 dark:bg-indigo-950/20 space-y-2.5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Landmark className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-900 dark:text-indigo-200">
+                Loan Account Cards from Accounts Section ({unifiedLoansOverview.unlinkedLoanAccounts.length})
+              </span>
+            </div>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+              Included in total loan calculations. Click &ldquo;Connect Amortization Schedule&rdquo; to generate full monthly EMI rows.
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+            {unifiedLoansOverview.unlinkedLoanAccounts.map((acc) => {
+              const matchedItem = unifiedLoansOverview.allActiveLoans.find((i) => i.id === acc.id);
+              const remBal = matchedItem ? matchedItem.remainingBalance : Math.abs(calculateAccountBalance(acc, transactions));
+              return (
+                <div
+                  key={acc.id}
+                  data-testid={`loans-tab-unlinked-acc-${acc.id}`}
+                  className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+                      {acc.name}
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                      Remaining: {formatMoney(remBal)}
+                      {acc.bankGivenEmi ? ` · Bank EMI: ${formatMoney(acc.bankGivenEmi)}/mo` : ''}
+                    </div>
+                  </div>
+                  {!readOnlyMode && (
+                    <button
+                      type="button"
+                      data-testid={`connect-loan-acc-schedule-btn-${acc.id}`}
+                      onClick={() => {
+                        openNewLoanForm('proper_emi');
+                        handleConnectLoanAccountSelect(acc.id);
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shrink-0 cursor-pointer"
+                    >
+                      Connect Schedule
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Loan Setup & Calculator / Edit Form with 2 Sections: 1. Proper Loan vs 2. Person/Org Flexible Loan */}
       {showCreateForm && !readOnlyMode && (

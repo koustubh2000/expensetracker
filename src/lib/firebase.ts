@@ -1089,11 +1089,19 @@ export async function fetchUserCloudVaultFromServer(
   }
 
   // Pick the newest non-empty vault between Firestore, Server Mirror, Local, and Canonical Seed
-  const mirrorTimeMs = mirrorVault ? Date.parse(mirrorVault.updatedAt || '') || 0 : 0;
+  const mirrorTimeMs =
+    mirrorVault && mirrorVault.updatedAt !== '1970-01-01T00:00:00.000Z'
+      ? Date.parse(mirrorVault.updatedAt || '') || 0
+      : 0;
   let chosenVault: UserVaultData | null = null;
 
   if (firestoreVault && hasVaultContent(firestoreVault)) {
-    if (mirrorVault && hasVaultContent(mirrorVault) && mirrorTimeMs > firestoreTimeMs) {
+    if (
+      mirrorVault &&
+      hasVaultContent(mirrorVault) &&
+      mirrorTimeMs > 0 &&
+      mirrorTimeMs > firestoreTimeMs
+    ) {
       chosenVault = mirrorVault;
     } else {
       chosenVault = firestoreVault;

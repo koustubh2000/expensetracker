@@ -225,6 +225,12 @@ export function calculatePersonLedger(
     recordIds?: string[];
     expectedItemIds?: string[];
     transactionIds?: string[];
+    itemsSnapshot?: Array<{
+      id: string;
+      isPaid?: boolean;
+      status?: string;
+      settledAmount?: number;
+    }>;
     isClearedToHistory?: boolean;
     allPaid?: boolean;
   }> = []
@@ -252,6 +258,7 @@ export function calculatePersonLedger(
         ...(grp.recordIds || []),
         ...(grp.expectedItemIds || []),
         ...(grp.transactionIds || []),
+        ...((grp.itemsSnapshot || []).map((s) => s.id).filter(Boolean)),
       ];
       for (const id of allIds) {
         personGroupRecordIds.add(id);
@@ -260,6 +267,11 @@ export function calculatePersonLedger(
         }
         if (grp.allPaid || grp.isClearedToHistory) {
           activeGroupPaidIds.add(id);
+        }
+      }
+      for (const snap of grp.itemsSnapshot || []) {
+        if (snap && snap.id && (snap.isPaid || snap.status === 'settled')) {
+          activeGroupPaidIds.add(snap.id);
         }
       }
     }
@@ -1963,6 +1975,58 @@ export function calculateGlobalReceivablesAndPayables(
     }
   }
 
+  for (const item of expectedItems || []) {
+    if (
+      processedItemIds.has(item.id) ||
+      clearedIds.has(item.id) ||
+      paidGroupIds.has(item.id) ||
+      (item.personId && blockedPersonIds.has(item.personId))
+    ) {
+      continue;
+    }
+    processedItemIds.add(item.id);
+    if (item.linkedTransactionId) {
+      processedTxIds.add(item.linkedTransactionId);
+    }
+
+    const amt = Math.max(0, Number(item.amount) || 0);
+    const settled =
+      item.status === 'settled'
+        ? amt
+        : Math.min(amt, Math.max(0, Number(item.settledAmount) || 0));
+    const due = Math.max(0, Math.round((amt - settled) * 100) / 100);
+    if (due <= 0.009) continue;
+
+    const isPayable = item.direction === 'borrowed_from';
+    const resolvedCat = resolveFlexibleLabel(item.category, item.customCategory);
+    const rec: GlobalSyncedCounterpartyRecord = {
+      id: item.id,
+      personId: item.personId,
+      personName: 'Counterparty',
+      title: item.title,
+      date: item.date,
+      dueDate: item.dueDate,
+      dueDateLabel: item.dueDate ? `Due ${item.dueDate}` : 'No Due Date',
+      category: resolvedCat,
+      categoryLabel: resolvedCat,
+      totalAmount: amt,
+      settledAmount: settled,
+      remainingAmount: due,
+      remainingDue: due,
+      status: settled > 0 ? 'partial' : 'pending',
+      sourceType: 'expected_item',
+      isPayable,
+    };
+
+    if (isPayable) {
+      totalMoneyIOwePayablesOnly += due;
+      livePayableRecords.push(rec);
+    } else {
+      totalExpectedMoneyComingIn += due;
+      liveReceivableRecords.push(rec);
+    }
+  }
+
   for (const tx of transactions || []) {
     if (
       tx.personId ||
@@ -2029,6 +2093,233 @@ export function calculateGlobalReceivablesAndPayables(
   };
 }
 
+export interface UnifiedDashboardLoanItem {
+  id: string;
+  source: 'loan_record' | 'account_card';
+  name: string;
+  lenderOrCategoryLabel: string;
+  loanCategoryLabel: string;
+  subTypeBadge: string;
+  isPersonalMarketLoan: boolean;
+  status: 'In Progress' | 'About to Start';
+  principalAmount: number;
+  remainingBalance: number;
+  monthlyEmi: number;
+  interestRateAnnual: number;
+  paidInstallmentsCount: number;
+  remainingInstallmentsCount: number;
+  totalInstallmentsCount: number;
+  totalAmountPaidSoFar: number;
+  accountNumberMasked?: string;
+  cardColor?: string;
+  bankLogoUrl?: string;
+  loanRecord?: LoanRecord;
+  schedule?: LoanAmortizationSummary;
+  loanAccount?: WalletAccount;
+}
+
+/**
+ * Computes a single deduplicated, unified view of all active Loans across both:
+ * 1. `vault.loans` (Amortization & Open-Tenure records in Loans & EMI)
+ * 2. `vault.accounts` where `type === 'Loan Account'` (Loan Account cards in Accounts)
+ *
+ * Connected pairs (`loan.connectedLoanAccountId === acc.id` or `acc.connectedLoanRecordId === loan.id`)
+ * are automatically merged into a single unified loan entry so counts and balances never double-count
+ * and stay 100% identical across Dashboard Top Loan Section, Dashboard "THE LOANS" Card, and Loans & EMI tab.
+ */
+export function calculateUnifiedLoansOverview(
+  accounts: WalletAccount[] = [],
+  loans: LoanRecord[] = [],
+  transactions: TransactionRecord[] = []
+): {
+  allActiveLoans: UnifiedDashboardLoanItem[];
+  legalAgreementLoans: UnifiedDashboardLoanItem[];
+  personalMarketLoans: UnifiedDashboardLoanItem[];
+  unlinkedLoanAccounts: WalletAccount[];
+  properEmiLoansBalance: number;
+  flexiblePersonOrgLoansBalance: number;
+  theLoansActiveBalance: number;
+  totalActiveLoansCount: number;
+  legalAgreementCount: number;
+  personalMarketCount: number;
+} {
+  const loanTypeAccounts = (accounts || []).filter((a) => a.type === 'Loan Account');
+  const connectedAccountIds = new Set<string>();
+  const allActiveLoans: UnifiedDashboardLoanItem[] = [];
+
+  for (const loan of loans || []) {
+    const connectedAcc = loanTypeAccounts.find(
+      (a) => a.id === loan.connectedLoanAccountId || a.connectedLoanRecordId === loan.id
+    );
+    if (connectedAcc) {
+      connectedAccountIds.add(connectedAcc.id);
+    }
+    if (loan.archivedToHistory) continue;
+
+    const sched = calculateLoanAmortizationSchedule(loan);
+    if (sched.isLoanClosed && sched.remainingBalance <= 0.01) continue;
+
+    const isPersonalMarket = loan.loanType === 'person_org_no_tenure';
+    const catLabel = resolveFlexibleLabel(loan.category, loan.customCategory);
+    const lenderOrCat = loan.lenderName
+      ? `${loan.lenderName} · ${catLabel}`
+      : catLabel;
+
+    let subTypeBadge = 'Bank / Agreement Loan';
+    if (isPersonalMarket) {
+      subTypeBadge = 'Personal / Market Loan';
+    } else if (/credit card/i.test(catLabel) || /credit card/i.test(loan.name)) {
+      subTypeBadge = 'Credit Card Loan';
+    } else if (/company|nbfc|bajaj|tata|fintech|org/i.test(catLabel) || /company|nbfc/i.test(loan.name)) {
+      subTypeBadge = 'Company / NBFC Loan';
+    } else if (/personal/i.test(catLabel)) {
+      subTypeBadge = 'Personal Bank Loan';
+    }
+
+    const effectiveRemaining =
+      sched.remainingBalance > 0
+        ? sched.remainingBalance
+        : connectedAcc &&
+          connectedAcc.currentRemainingLoanAmount !== undefined &&
+          connectedAcc.currentRemainingLoanAmount > 0
+        ? Math.round(Number(connectedAcc.currentRemainingLoanAmount) * 100) / 100
+        : sched.remainingBalance;
+
+    allActiveLoans.push({
+      id: loan.id,
+      source: 'loan_record',
+      name: loan.name,
+      lenderOrCategoryLabel: lenderOrCat,
+      loanCategoryLabel: catLabel,
+      subTypeBadge,
+      isPersonalMarketLoan: isPersonalMarket,
+      status: loan.status || 'In Progress',
+      principalAmount: sched.totalPrincipal,
+      remainingBalance: effectiveRemaining,
+      monthlyEmi: sched.scheduledMonthlyEmi,
+      interestRateAnnual: Number(loan.interestRateAnnual) || 0,
+      paidInstallmentsCount: sched.paidInstallmentsCount,
+      remainingInstallmentsCount: sched.remainingInstallmentsCount,
+      totalInstallmentsCount: sched.rows.length,
+      totalAmountPaidSoFar: sched.totalAmountPaidSoFar,
+      accountNumberMasked: connectedAcc?.accountNumber,
+      cardColor: connectedAcc?.color || (isPersonalMarket ? '#b45309' : '#4338ca'),
+      bankLogoUrl: connectedAcc?.bankLogoUrl,
+      loanRecord: loan,
+      schedule: sched,
+      loanAccount: connectedAcc,
+    });
+  }
+
+  const unlinkedLoanAccounts: WalletAccount[] = [];
+
+  for (const acc of loanTypeAccounts) {
+    if (connectedAccountIds.has(acc.id)) continue;
+    if (acc.connectedLoanRecordId) {
+      const matchingLoan = (loans || []).find((l) => l.id === acc.connectedLoanRecordId);
+      if (matchingLoan) {
+        connectedAccountIds.add(acc.id);
+        continue;
+      }
+    }
+
+    unlinkedLoanAccounts.push(acc);
+
+    const actualAccBal = calculateAccountBalance(acc, transactions || []);
+    const remBal =
+      acc.currentRemainingLoanAmount !== undefined &&
+      acc.currentRemainingLoanAmount !== null &&
+      !Number.isNaN(Number(acc.currentRemainingLoanAmount)) &&
+      Number(acc.currentRemainingLoanAmount) > 0
+        ? Math.max(0, Math.round(Number(acc.currentRemainingLoanAmount) * 100) / 100)
+        : acc.sanctionedLoanAmount !== undefined &&
+          acc.sanctionedLoanAmount > 0 &&
+          actualAccBal === 0 &&
+          acc.currentRemainingLoanAmount === undefined
+        ? Math.max(0, Math.round(Number(acc.sanctionedLoanAmount) * 100) / 100)
+        : Math.round(Math.abs(actualAccBal) * 100) / 100;
+
+    const principalAmt =
+      acc.sanctionedLoanAmount !== undefined && acc.sanctionedLoanAmount > 0
+        ? Math.round(Number(acc.sanctionedLoanAmount) * 100) / 100
+        : remBal;
+
+    const bankEmi =
+      acc.bankGivenEmi !== undefined && acc.bankGivenEmi > 0
+        ? Math.round(Number(acc.bankGivenEmi) * 100) / 100
+        : 0;
+
+    const customLabel = acc.customType?.trim() || 'Loan Account';
+    const isPersonalMarket =
+      /\b(personal|market|friend|family|relative|informal|hand loan)\b/i.test(customLabel) ||
+      /\b(market|hand loan|friend|relative)\b/i.test(acc.name);
+
+    let subTypeBadge = 'Bank Loan Account';
+    if (isPersonalMarket) {
+      subTypeBadge = 'Personal / Market Loan';
+    } else if (/credit card/i.test(acc.name) || /credit card/i.test(customLabel)) {
+      subTypeBadge = 'Credit Card Loan';
+    } else if (/company|nbfc|bajaj|tata|finance/i.test(acc.name) || /company|nbfc/i.test(customLabel)) {
+      subTypeBadge = 'Company / Card Loan';
+    }
+
+    const estRemainingInstallments =
+      bankEmi > 0 && remBal > 0 ? Math.max(1, Math.ceil(remBal / bankEmi)) : acc.loanTenureMonths || 0;
+
+    allActiveLoans.push({
+      id: acc.id,
+      source: 'account_card',
+      name: acc.name,
+      lenderOrCategoryLabel: acc.branchName ? `${customLabel} · ${acc.branchName}` : customLabel,
+      loanCategoryLabel: customLabel,
+      subTypeBadge,
+      isPersonalMarketLoan: isPersonalMarket,
+      status: acc.loanStatus || 'In Progress',
+      principalAmount: principalAmt,
+      remainingBalance: remBal,
+      monthlyEmi: bankEmi,
+      interestRateAnnual: Number(acc.loanInterestRate) || 0,
+      paidInstallmentsCount: 0,
+      remainingInstallmentsCount: estRemainingInstallments,
+      totalInstallmentsCount: acc.loanTenureMonths || estRemainingInstallments,
+      totalAmountPaidSoFar: Math.max(0, Math.round((principalAmt - remBal) * 100) / 100),
+      accountNumberMasked: acc.accountNumber,
+      cardColor: acc.color || (isPersonalMarket ? '#b45309' : '#be123c'),
+      bankLogoUrl: acc.bankLogoUrl,
+      loanAccount: acc,
+    });
+  }
+
+  const legalAgreementLoans = allActiveLoans.filter((item) => !item.isPersonalMarketLoan);
+  const personalMarketLoans = allActiveLoans.filter((item) => item.isPersonalMarketLoan);
+
+  const properEmiLoansBalance =
+    Math.round(
+      legalAgreementLoans.reduce((sum, item) => sum + (Number(item.remainingBalance) || 0), 0) * 100
+    ) / 100;
+
+  const flexiblePersonOrgLoansBalance =
+    Math.round(
+      personalMarketLoans.reduce((sum, item) => sum + (Number(item.remainingBalance) || 0), 0) * 100
+    ) / 100;
+
+  const theLoansActiveBalance =
+    Math.round((properEmiLoansBalance + flexiblePersonOrgLoansBalance) * 100) / 100;
+
+  return {
+    allActiveLoans,
+    legalAgreementLoans,
+    personalMarketLoans,
+    unlinkedLoanAccounts,
+    properEmiLoansBalance,
+    flexiblePersonOrgLoansBalance,
+    theLoansActiveBalance,
+    totalActiveLoansCount: allActiveLoans.length,
+    legalAgreementCount: legalAgreementLoans.length,
+    personalMarketCount: personalMarketLoans.length,
+  };
+}
+
 export function calculateDashboardSummaryCards(
   accounts: WalletAccount[],
   transactions: TransactionRecord[],
@@ -2042,6 +2333,12 @@ export function calculateDashboardSummaryCards(
     recordIds?: string[];
     expectedItemIds?: string[];
     transactionIds?: string[];
+    itemsSnapshot?: Array<{
+      id: string;
+      isPaid?: boolean;
+      status?: string;
+      settledAmount?: number;
+    }>;
     isClearedToHistory?: boolean;
     allPaid?: boolean;
   }> = []
@@ -2053,6 +2350,12 @@ export function calculateDashboardSummaryCards(
   theLoansActiveBalance: number;
   properEmiLoansBalance: number;
   flexiblePersonOrgLoansBalance: number;
+  totalActiveLoansCount: number;
+  legalAgreementLoansCount: number;
+  personalMarketLoansCount: number;
+  legalAgreementLoans: UnifiedDashboardLoanItem[];
+  personalMarketLoans: UnifiedDashboardLoanItem[];
+  allUnifiedLoans: UnifiedDashboardLoanItem[];
   totalInvestmentsAmount: number;
   totalFdCount: number;
   totalFdAmount: number;
@@ -2061,7 +2364,7 @@ export function calculateDashboardSummaryCards(
   livePayableRecords: GlobalSyncedCounterpartyRecord[];
 } {
   const totalCountedInAllMyAccounts = (accounts || [])
-    .filter((acc) => acc.includeInNetWorth !== false)
+    .filter((acc) => acc.includeInNetWorth !== false && acc.type !== 'Loan Account')
     .reduce((sum, acc) => sum + calculateAccountBalance(acc, transactions || []), 0);
 
   const syncedPeopleTotals = calculateGlobalReceivablesAndPayables(
@@ -2071,30 +2374,15 @@ export function calculateDashboardSummaryCards(
     personRecordGroups
   );
 
-  let properEmiLoansBalance = 0;
-  let flexiblePersonOrgLoansBalance = 0;
-
-  for (const loan of loans || []) {
-    if (loan.archivedToHistory) continue;
-    const sched = calculateLoanAmortizationSchedule(loan);
-    if (sched.isLoanClosed || sched.remainingBalance <= 0.01) continue;
-    if (loan.loanType === 'person_org_no_tenure') {
-      flexiblePersonOrgLoansBalance += sched.remainingBalance;
-    } else {
-      properEmiLoansBalance += sched.remainingBalance;
-    }
-  }
-
-  properEmiLoansBalance = Math.round(properEmiLoansBalance * 100) / 100;
-  flexiblePersonOrgLoansBalance = Math.round(flexiblePersonOrgLoansBalance * 100) / 100;
+  const unifiedLoans = calculateUnifiedLoansOverview(accounts, loans, transactions);
+  const properEmiLoansBalance = unifiedLoans.properEmiLoansBalance;
+  const flexiblePersonOrgLoansBalance = unifiedLoans.flexiblePersonOrgLoansBalance;
+  const theLoansActiveBalance = unifiedLoans.theLoansActiveBalance;
 
   const theMoneyIOwePayablesOnly = syncedPeopleTotals.totalMoneyIOwePayablesOnly;
 
   const theMoneyIOweToPeopleAndOrgs =
     Math.round((theMoneyIOwePayablesOnly + flexiblePersonOrgLoansBalance) * 100) / 100;
-
-  const theLoansActiveBalance =
-    Math.round((properEmiLoansBalance + flexiblePersonOrgLoansBalance) * 100) / 100;
 
   let totalInvestmentsAmount = 0;
   let totalFdCount = 0;
@@ -2123,6 +2411,12 @@ export function calculateDashboardSummaryCards(
     theLoansActiveBalance,
     properEmiLoansBalance,
     flexiblePersonOrgLoansBalance,
+    totalActiveLoansCount: unifiedLoans.totalActiveLoansCount,
+    legalAgreementLoansCount: unifiedLoans.legalAgreementCount,
+    personalMarketLoansCount: unifiedLoans.personalMarketCount,
+    legalAgreementLoans: unifiedLoans.legalAgreementLoans,
+    personalMarketLoans: unifiedLoans.personalMarketLoans,
+    allUnifiedLoans: unifiedLoans.allActiveLoans,
     totalInvestmentsAmount: Math.round(totalInvestmentsAmount * 100) / 100,
     totalFdCount,
     totalFdAmount: Math.round(totalFdAmount * 100) / 100,
@@ -2226,6 +2520,9 @@ export function calculateAccountRecurringProjection(
 
 export const LOAN_CATEGORIES: LoanCategory[] = [
   'Customize Loan',
+  'Personal Loan',
+  'Credit Card Loan',
+  'Company / NBFC Loan',
   'Education Loan',
   'Home Loan',
   'Car Loan',

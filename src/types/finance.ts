@@ -237,6 +237,8 @@ export interface RecurringPaymentItem {
 export type LoanCategory =
   | 'Customize Loan'
   | 'Personal Loan'
+  | 'Credit Card Loan'
+  | 'Company / NBFC Loan'
   | 'Education Loan'
   | 'Home Loan'
   | 'Car Loan'

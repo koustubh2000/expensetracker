@@ -25,7 +25,7 @@ export function getCanonicalSeedUsers(): UserAccount[] {
       role: 'user',
       email: DEFAULT_PRIMARY_ADMIN_EMAIL,
       createdAt: '2026-11-09T15:39:55.911Z',
-      updatedAt: '2026-11-12T10:00:00.000Z',
+      updatedAt: '1970-01-01T00:00:00.000Z',
       currency: '₹',
       customCategories: ['Hotel', 'Petrol'],
     },
@@ -37,7 +37,7 @@ export function getCanonicalSeedUsers(): UserAccount[] {
         'zk_sha256_v1$bafed41034ab425f$c85ba80986c033607280ee78a9fe4dd1645a7a633c70b1059f2f0381ffda0bb9',
       role: 'user',
       createdAt: '2026-11-09T10:20:02.604Z',
-      updatedAt: '2026-11-12T10:00:00.000Z',
+      updatedAt: '1970-01-01T00:00:00.000Z',
       currency: '₹',
       customCategories: ['Personal things'],
     },
@@ -46,7 +46,7 @@ export function getCanonicalSeedUsers(): UserAccount[] {
 
 export const CANONICAL_KOUSTUBH_VAULT: UserVaultData = {
   userId: 'user-1794238795911',
-  updatedAt: '2026-11-12T19:50:00.000Z',
+  updatedAt: '1970-01-01T00:00:00.000Z',
   nextRecordNumber: 132,
   accounts: [
     {
