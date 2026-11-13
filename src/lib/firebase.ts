@@ -12,7 +12,6 @@ import {
   getFirestore,
   doc,
   getDoc,
-  getDocFromServer,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -22,7 +21,6 @@ import {
   onSnapshot,
   serverTimestamp,
   getDocs,
-  getDocsFromServer,
   setLogLevel,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -55,6 +53,10 @@ import {
   ensureZeroKnowledgeUsers,
   isPollutedTestUser,
 } from '../utils/financeRules';
+import {
+  getCanonicalSeedUsers,
+  getCanonicalSeedVault,
+} from '../utils/canonicalCloudSeed';
 
 // Silence noisy internal Firestore WebChannel backoff logs when free-tier daily quota is reached
 try {
@@ -78,6 +80,65 @@ try {
   // ignore
 }
 const lastLocalVaultWriteMsByUser = new Map<string, number>();
+let firestoreQuotaExhaustedUntilMs = 0;
+
+function isQuotaError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err || '');
+  return (
+    msg.includes('resource-exhausted') ||
+    msg.includes('Quota limit exceeded') ||
+    msg.includes('Quota exceeded')
+  );
+}
+
+function markQuotaExhaustedIfMatched(err: unknown): void {
+  if (isQuotaError(err)) {
+    // Pause redundant Firestore network calls for 5 minutes when daily free-tier quota is exhausted
+    firestoreQuotaExhaustedUntilMs = Date.now() + 5 * 60 * 1000;
+  }
+}
+
+function canCallFirestoreNow(): boolean {
+  return Date.now() >= firestoreQuotaExhaustedUntilMs;
+}
+
+interface ServerMirrorState {
+  users?: UserAccount[];
+  deletedUserIds?: string[];
+  vaults?: Record<string, UserVaultData>;
+  globalConfig?: {
+    landingHeroImage?: string | null;
+    pdfHeaderConfig?: PdfHeaderImageConfig | null;
+    updatedAt?: number;
+  };
+}
+
+async function fetchFromServerMirror(): Promise<ServerMirrorState | null> {
+  if (typeof fetch === 'undefined') return null;
+  try {
+    const res = await fetch('/api/vault-mirror', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as ServerMirrorState;
+  } catch {
+    return null;
+  }
+}
+
+async function pushToServerMirror(payload: Record<string, unknown>): Promise<void> {
+  if (typeof fetch === 'undefined') return;
+  try {
+    await fetch('/api/vault-mirror', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    // ignore offline/build environments
+  }
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -97,7 +158,7 @@ export interface FirestoreErrorInfo {
     email?: string | null;
     emailVerified?: boolean | null;
     isAnonymous?: boolean | null;
-    tenantId?: string | null;
+    tenantId?: boolean | string | null;
     providerInfo?: {
       providerId?: string | null;
       email?: string | null;
@@ -110,6 +171,7 @@ export function handleFirestoreError(
   operationType: OperationType,
   path: string | null
 ): never {
+  markQuotaExhaustedIfMatched(error);
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -130,18 +192,6 @@ export function handleFirestoreError(
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-
-// Validate connection to Firestore on boot
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'globalConfig', 'main'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
-    }
-  }
-}
-testConnection();
 
 // Defensive payload sanitization helpers matching firebase-blueprint.json maxLengths & patterns
 const cleanId = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128) || 'doc_1';
@@ -165,7 +215,7 @@ export type { User };
 // ============================================================================
 // AUTOMATIC REAL-TIME CROSS-DEVICE SYNC (Desktop <-> Mobile <-> Custom Domain)
 // Syncs Front Page Hero Photo, PDF Header Config, User/Admin Accounts & Passwords,
-// and Per-User Financial Vaults automatically via Cloud Firestore.
+// and Per-User Financial Vaults automatically via Cloud Firestore + Server Mirror.
 // ============================================================================
 
 /**
@@ -181,6 +231,9 @@ export function subscribeToGlobalCloudConfig(callbacks: {
     pdfHeaderConfig: PdfHeaderImageConfig;
   };
 }): () => void {
+  if (!canCallFirestoreNow()) {
+    return () => {};
+  }
   const configRef = doc(db, 'globalConfig', 'main');
   let seededInitial = false;
 
@@ -244,7 +297,7 @@ export function subscribeToGlobalCloudConfig(callbacks: {
       }
     },
     (err) => {
-      console.warn('Global config sync listener notice:', err?.message || err);
+      markQuotaExhaustedIfMatched(err);
     }
   );
 }
@@ -256,6 +309,16 @@ export async function saveGlobalCloudConfig(
   landingHeroImage: string | null,
   pdfHeaderConfig: PdfHeaderImageConfig
 ): Promise<void> {
+  await pushToServerMirror({
+    globalConfig: {
+      landingHeroImage,
+      pdfHeaderConfig: pdfHeaderConfig || DEFAULT_PDF_HEADER_CONFIG,
+      updatedAt: Date.now(),
+    },
+  });
+
+  if (!canCallFirestoreNow()) return;
+
   let safePdfJson = JSON.stringify(pdfHeaderConfig || DEFAULT_PDF_HEADER_CONFIG);
   if (safePdfJson.length > 450000) {
     safePdfJson = JSON.stringify({
@@ -287,8 +350,50 @@ export async function saveGlobalCloudConfig(
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
-    console.warn('Failed to push global config to cloud:', error);
+    markQuotaExhaustedIfMatched(error);
   }
+}
+
+function mergeUserListsSafely(
+  primaryUsers: UserAccount[],
+  secondaryUsers: UserAccount[],
+  deletedIds: Set<string>
+): UserAccount[] {
+  const byId = new Map<string, UserAccount>();
+  const canonicalSeeds = getCanonicalSeedUsers();
+
+  // 1. Start with canonical seeds so admin, koustubh, and Tejashree are never lost unless explicitly deleted
+  for (const seedUser of canonicalSeeds) {
+    if (seedUser.id === 'user-admin' || !deletedIds.has(seedUser.id)) {
+      byId.set(seedUser.id, seedUser);
+    }
+  }
+
+  // 2. Layer secondary users
+  for (const u of secondaryUsers) {
+    if (!u || !u.id || !u.username || isPollutedTestUser(u)) continue;
+    if (u.id !== 'user-admin' && deletedIds.has(u.id)) continue;
+    byId.set(u.id, {
+      ...u,
+      avatarThumbnailDataUrl:
+        u.avatarThumbnailDataUrl || loadProofImageLocally(`user-avatar-${u.id}`),
+    });
+  }
+
+  // 3. Layer primary (authoritative) users
+  for (const u of primaryUsers) {
+    if (!u || !u.id || !u.username || isPollutedTestUser(u)) continue;
+    if (u.id !== 'user-admin' && deletedIds.has(u.id)) continue;
+    byId.set(u.id, {
+      ...u,
+      avatarThumbnailDataUrl:
+        u.avatarThumbnailDataUrl || loadProofImageLocally(`user-avatar-${u.id}`),
+    });
+  }
+
+  const merged = Array.from(byId.values());
+  const { users: sanitized } = ensureZeroKnowledgeUsers(merged);
+  return sanitized;
 }
 
 /**
@@ -300,6 +405,9 @@ export function subscribeToCloudUsers(callbacks: {
   onUsers: (users: UserAccount[]) => void;
   getInitialLocalUsers: () => UserAccount[];
 }): () => void {
+  if (!canCallFirestoreNow()) {
+    return () => {};
+  }
   let seededInitial = false;
 
   return onSnapshot(
@@ -345,94 +453,90 @@ export function subscribeToCloudUsers(callbacks: {
       }
 
       if (cloudUsersList.length > 0) {
-        if (
-          !cloudUsersList.some(
-            (u) => u.id === 'user-admin' || u.username.toLowerCase() === 'admin'
-          )
-        ) {
-          const fallbackAdmin = localUsers.find(
-            (u) => u.id === 'user-admin' || u.username.toLowerCase() === 'admin'
-          );
-          if (fallbackAdmin) {
-            cloudUsersList.unshift(fallbackAdmin);
-          }
-        }
-        const { users: sanitizedUsers } = ensureZeroKnowledgeUsers(cloudUsersList);
+        const sanitizedUsers = mergeUserListsSafely(cloudUsersList, localUsers, deletedIds);
         saveUsersToLocal(sanitizedUsers, false);
+        pushToServerMirror({ users: sanitizedUsers }).catch(() => {});
         callbacks.onUsers(sanitizedUsers);
       }
     },
     (err) => {
-      console.warn('Cloud users sync listener notice:', err?.message || err);
+      markQuotaExhaustedIfMatched(err);
     }
   );
 }
 
 /**
- * Explicitly fetches all users from `/appUsers` on the Firestore server so the app always uses the latest Firebase user records.
+ * Explicitly fetches all users from Server Mirror + `/appUsers` on Firestore so the app always uses the latest user records.
  */
 export async function fetchCloudUsersFromServer(
   localUsers: UserAccount[]
 ): Promise<UserAccount[] | null> {
-  try {
-    let snap;
-    try {
-      snap = await getDocsFromServer(collection(db, 'appUsers'));
-    } catch {
-      snap = await getDocs(collection(db, 'appUsers'));
-    }
-    if (snap.empty) {
-      return null;
-    }
-    const deletedIds = new Set(loadDeletedUserIdsFromLocal());
-    const cloudUsersList: UserAccount[] = [];
+  const deletedIds = new Set(loadDeletedUserIdsFromLocal());
+  let mirrorUsers: UserAccount[] = [];
 
-    for (const d of snap.docs) {
-      const data = d.data();
-      if (typeof data.userJson === 'string') {
-        try {
-          const parsed = JSON.parse(data.userJson) as UserAccount;
-          if (
-            parsed &&
-            parsed.id &&
-            parsed.username &&
-            !isPollutedTestUser(parsed) &&
-            (parsed.id === 'user-admin' || !deletedIds.has(parsed.id))
-          ) {
-            cloudUsersList.push({
-              ...parsed,
-              avatarThumbnailDataUrl:
-                parsed.avatarThumbnailDataUrl ||
-                loadProofImageLocally(`user-avatar-${parsed.id}`),
-            });
-          }
-        } catch {
-          // ignore malformed doc
+  const mirror = await fetchFromServerMirror();
+  if (mirror) {
+    if (Array.isArray(mirror.deletedUserIds)) {
+      for (const delId of mirror.deletedUserIds) {
+        if (delId && delId !== 'user-admin') {
+          deletedIds.add(delId);
+          markUserIdDeletedLocally(delId);
         }
       }
     }
-
-    if (cloudUsersList.length === 0) return null;
-    if (
-      !cloudUsersList.some((u) => u.id === 'user-admin' || u.username.toLowerCase() === 'admin')
-    ) {
-      const fallbackAdmin = localUsers.find(
-        (u) => u.id === 'user-admin' || u.username.toLowerCase() === 'admin'
-      );
-      if (fallbackAdmin) {
-        cloudUsersList.unshift(fallbackAdmin);
-      }
+    if (Array.isArray(mirror.users)) {
+      mirrorUsers = mirror.users;
     }
-    const { users: sanitizedUsers } = ensureZeroKnowledgeUsers(cloudUsersList);
-    saveUsersToLocal(sanitizedUsers, false);
-    return sanitizedUsers;
-  } catch {
-    return null;
   }
+
+  const cloudUsersList: UserAccount[] = [];
+  if (canCallFirestoreNow()) {
+    try {
+      const snap = await getDocs(collection(db, 'appUsers'));
+      if (!snap.empty) {
+        for (const d of snap.docs) {
+          const data = d.data();
+          if (typeof data.userJson === 'string') {
+            try {
+              const parsed = JSON.parse(data.userJson) as UserAccount;
+              if (
+                parsed &&
+                parsed.id &&
+                parsed.username &&
+                !isPollutedTestUser(parsed) &&
+                (parsed.id === 'user-admin' || !deletedIds.has(parsed.id))
+              ) {
+                cloudUsersList.push({
+                  ...parsed,
+                  avatarThumbnailDataUrl:
+                    parsed.avatarThumbnailDataUrl ||
+                    loadProofImageLocally(`user-avatar-${parsed.id}`),
+                });
+              }
+            } catch {
+              // ignore malformed doc
+            }
+          }
+        }
+      }
+    } catch (err) {
+      markQuotaExhaustedIfMatched(err);
+    }
+  }
+
+  const mergedWithMirror = mergeUserListsSafely(mirrorUsers, localUsers, deletedIds);
+  const finalUsers =
+    cloudUsersList.length > 0
+      ? mergeUserListsSafely(cloudUsersList, mergedWithMirror, deletedIds)
+      : mergedWithMirror;
+
+  saveUsersToLocal(finalUsers, false);
+  await pushToServerMirror({ users: finalUsers });
+  return finalUsers;
 }
 
 /**
- * Pushes all user accounts (or updated Admin/Customer account) to `/appUsers/{userId}` in Firestore.
+ * Pushes all user accounts (or updated Admin/Customer account) to Server Mirror and `/appUsers/{userId}` in Firestore.
  * Always enforces irreversible zero-knowledge password & PIN hashing prior to cloud persistence.
  */
 export async function syncUsersToCloud(users: UserAccount[]): Promise<void> {
@@ -441,6 +545,11 @@ export async function syncUsersToCloud(users: UserAccount[]): Promise<void> {
     (u) => u && !isPollutedTestUser(u) && (u.id === 'user-admin' || !deletedIds.has(u.id))
   );
   const { users: sanitizedUsers } = ensureZeroKnowledgeUsers(activeUsers);
+
+  await pushToServerMirror({ users: sanitizedUsers });
+
+  if (!canCallFirestoreNow()) return;
+
   try {
     await Promise.all(
       sanitizedUsers.map(async (user) => {
@@ -462,7 +571,7 @@ export async function syncUsersToCloud(users: UserAccount[]): Promise<void> {
       })
     );
   } catch (error) {
-    console.warn('Failed to sync users to cloud:', error);
+    markQuotaExhaustedIfMatched(error);
   }
 }
 
@@ -594,19 +703,23 @@ export async function verifyAdminEmailOwnershipWithFirebaseGoogle(
 }
 
 /**
- * Deletes a user account and their vault from `/appUsers/{userId}` and `/userVaults/{userId}` in Firestore.
+ * Deletes a user account and their vault from Server Mirror, `/appUsers/{userId}`, and `/userVaults/{userId}` in Firestore.
  */
 export async function deleteUserFromCloud(userId: string): Promise<void> {
   const safeUserId = cleanId(userId);
   if (safeUserId === 'user-admin') return;
   markUserIdDeletedLocally(userId);
+  await pushToServerMirror({ deleteUserId: safeUserId });
+
+  if (!canCallFirestoreNow()) return;
+
   try {
     await Promise.all([
       deleteDoc(doc(db, 'appUsers', safeUserId)),
       deleteDoc(doc(db, 'userVaults', safeUserId)),
     ]);
   } catch (error) {
-    console.warn('Failed to delete user from cloud:', error);
+    markQuotaExhaustedIfMatched(error);
   }
 }
 
@@ -621,6 +734,24 @@ export async function resetEntireCloudPortal(
     const nonPrimaryIds = existingUsers
       .map((u) => cleanId(u.id))
       .filter((id) => id !== 'user-admin');
+
+    for (const id of nonPrimaryIds) {
+      await pushToServerMirror({ deleteUserId: id });
+    }
+    await pushToServerMirror({
+      users: [freshAdmin],
+      vault: {
+        userId: 'user-admin',
+        updatedAt: new Date().toISOString(),
+        accounts: [],
+        transactions: [],
+        people: [],
+        expectedItems: [],
+        dreamVaults: [],
+      },
+    });
+
+    if (!canCallFirestoreNow()) return;
 
     await Promise.all([
       ...nonPrimaryIds.map((id) => deleteDoc(doc(db, 'appUsers', id)).catch(() => {})),
@@ -648,14 +779,12 @@ export async function resetEntireCloudPortal(
       saveGlobalCloudConfig(null, DEFAULT_PDF_HEADER_CONFIG),
     ]);
   } catch (error) {
-    console.warn('Failed to reset entire cloud portal:', error);
+    markQuotaExhaustedIfMatched(error);
   }
 }
 
 /**
- * Subscribes in real time to `/userVaults/{userId}` so a user's wallets, records, proof images,
- * people, expected bills, and dream vaults automatically sync across Desktop & Mobile.
- * Local vault changes with a newer `updatedAt` timestamp are never overwritten by stale cloud snapshots.
+ * Hydrates a vault payload with locally cached proof images, bank logos, and dream images.
  */
 function hydrateCloudVaultPayload(parsed: UserVaultData, fallbackUserId: string): UserVaultData {
   const hydrated: UserVaultData = {
@@ -742,6 +871,9 @@ export function subscribeToUserCloudVault(
     getInitialLocalVault: () => UserVaultData;
   }
 ): () => void {
+  if (!canCallFirestoreNow()) {
+    return () => {};
+  }
   const safeUserId = cleanId(userId);
   const vaultRef = doc(db, 'userVaults', safeUserId);
   let seededInitial = false;
@@ -789,6 +921,7 @@ export function subscribeToUserCloudVault(
                 hydrated.updatedAt = new Date(cloudTime || Date.now()).toISOString();
               }
               saveUserVault(hydrated, true);
+              pushToServerMirror({ vault: hydrated }).catch(() => {});
               callbacks.onVault(hydrated);
               return;
             }
@@ -814,84 +947,102 @@ export function subscribeToUserCloudVault(
       }
     },
     (err) => {
-      console.warn('User vault sync listener notice:', err?.message || err);
+      markQuotaExhaustedIfMatched(err);
     }
   );
 }
 
 /**
- * Actively fetches `/userVaults/{userId}` from the Firestore server on login or mount so the app
- * ALWAYS loads the latest Firebase database across all browsers (standard, Tor, Incognito, Mobile).
+ * Actively fetches `/userVaults/{userId}` from Server Mirror + Firestore on login or mount so the app
+ * ALWAYS loads the latest user database across all browsers (standard, Tor, Incognito, Mobile).
  */
 export async function fetchUserCloudVaultFromServer(
   userId: string,
   currentLocalVault?: UserVaultData
 ): Promise<UserVaultData | null> {
   const safeUserId = cleanId(userId);
-  const vaultRef = doc(db, 'userVaults', safeUserId);
-  try {
-    let snap;
-    try {
-      snap = await getDocFromServer(vaultRef);
-    } catch {
-      snap = await getDoc(vaultRef);
+  const recentLocalWriteMs = lastLocalVaultWriteMsByUser.get(safeUserId) || 0;
+
+  // 1. Check Server Mirror first (instant, zero quota limits, persists across all browsers & incognito)
+  let mirrorVault: UserVaultData | null = null;
+  const mirror = await fetchFromServerMirror();
+  if (mirror && mirror.vaults && mirror.vaults[safeUserId]) {
+    const candidate = mirror.vaults[safeUserId];
+    if (candidate && Array.isArray(candidate.accounts) && Array.isArray(candidate.transactions)) {
+      mirrorVault = candidate;
     }
-
-    const localVault = currentLocalVault;
-    const localHasData = hasVaultContent(localVault);
-
-    if (!snap.exists()) {
-      if (localVault && localHasData) {
-        await saveUserCloudVault(localVault);
-      }
-      return null;
-    }
-
-    const data = snap.data();
-    if (data && typeof data.vaultJson === 'string' && data.vaultJson.length >= 2) {
-      const parsed = JSON.parse(data.vaultJson) as UserVaultData;
-      if (parsed && Array.isArray(parsed.accounts) && Array.isArray(parsed.transactions)) {
-        const cloudHasData = hasVaultContent(parsed);
-        const docServerMs =
-          data.updatedAt && typeof data.updatedAt.toMillis === 'function'
-            ? data.updatedAt.toMillis()
-            : 0;
-        const parsedCloudMs = Date.parse(parsed.updatedAt || '');
-        const cloudTime =
-          !Number.isNaN(parsedCloudMs) && parsedCloudMs > 0 ? parsedCloudMs : docServerMs;
-        const recentLocalWriteMs = lastLocalVaultWriteMsByUser.get(safeUserId) || 0;
-
-        if (recentLocalWriteMs > 0 && cloudTime > 0 && cloudTime < recentLocalWriteMs - 500) {
-          return localVault || null;
-        }
-
-        if (cloudHasData) {
-          const hydrated = hydrateCloudVaultPayload(parsed, userId);
-          if (!hydrated.updatedAt || Date.parse(hydrated.updatedAt) <= 0) {
-            hydrated.updatedAt = new Date(cloudTime || Date.now()).toISOString();
-          }
-          saveUserVault(hydrated, true);
-          return hydrated;
-        }
-
-        if (localVault && localHasData && !cloudHasData && recentLocalWriteMs === 0) {
-          await saveUserCloudVault(localVault);
-          return localVault;
-        }
-
-        const hydrated = hydrateCloudVaultPayload(parsed, userId);
-        saveUserVault(hydrated, true);
-        return hydrated;
-      }
-    }
-    return null;
-  } catch {
-    return null;
   }
+
+  // 2. Also check Firestore if quota is available
+  let firestoreVault: UserVaultData | null = null;
+  let firestoreTimeMs = 0;
+  if (canCallFirestoreNow()) {
+    try {
+      const vaultRef = doc(db, 'userVaults', safeUserId);
+      const snap = await getDoc(vaultRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data && typeof data.vaultJson === 'string' && data.vaultJson.length >= 2) {
+          const parsed = JSON.parse(data.vaultJson) as UserVaultData;
+          if (parsed && Array.isArray(parsed.accounts) && Array.isArray(parsed.transactions)) {
+            firestoreVault = parsed;
+            const docServerMs =
+              data.updatedAt && typeof data.updatedAt.toMillis === 'function'
+                ? data.updatedAt.toMillis()
+                : 0;
+            const parsedCloudMs = Date.parse(parsed.updatedAt || '');
+            firestoreTimeMs =
+              !Number.isNaN(parsedCloudMs) && parsedCloudMs > 0 ? parsedCloudMs : docServerMs;
+          }
+        }
+      }
+    } catch (err) {
+      markQuotaExhaustedIfMatched(err);
+    }
+  }
+
+  // Pick the newest non-empty vault between Firestore, Server Mirror, Local, and Canonical Seed
+  const mirrorTimeMs = mirrorVault ? Date.parse(mirrorVault.updatedAt || '') || 0 : 0;
+  let chosenVault: UserVaultData | null = null;
+
+  if (firestoreVault && hasVaultContent(firestoreVault)) {
+    if (mirrorVault && hasVaultContent(mirrorVault) && mirrorTimeMs > firestoreTimeMs) {
+      chosenVault = mirrorVault;
+    } else {
+      chosenVault = firestoreVault;
+    }
+  } else if (mirrorVault && hasVaultContent(mirrorVault)) {
+    chosenVault = mirrorVault;
+  } else if (currentLocalVault && hasVaultContent(currentLocalVault)) {
+    chosenVault = currentLocalVault;
+  } else {
+    const seedVault = getCanonicalSeedVault(safeUserId);
+    if (seedVault && hasVaultContent(seedVault)) {
+      chosenVault = seedVault;
+    }
+  }
+
+  if (chosenVault) {
+    const chosenTimeMs = Date.parse(chosenVault.updatedAt || '') || 0;
+    if (
+      recentLocalWriteMs > 0 &&
+      chosenTimeMs > 0 &&
+      chosenTimeMs < recentLocalWriteMs - 500 &&
+      currentLocalVault
+    ) {
+      return currentLocalVault;
+    }
+    const hydrated = hydrateCloudVaultPayload(chosenVault, userId);
+    saveUserVault(hydrated, true);
+    await pushToServerMirror({ vault: hydrated });
+    return hydrated;
+  }
+
+  return currentLocalVault || null;
 }
 
 /**
- * Saves a user's financial vault to `/userVaults/{userId}` in Cloud Firestore.
+ * Saves a user's financial vault to Server Mirror and `/userVaults/{userId}` in Cloud Firestore.
  */
 export async function saveUserCloudVault(vault: UserVaultData): Promise<void> {
   const safeUserId = cleanId(vault.userId);
@@ -901,7 +1052,7 @@ export async function saveUserCloudVault(vault: UserVaultData): Promise<void> {
       : new Date().toISOString();
   lastLocalVaultWriteMsByUser.set(safeUserId, Date.parse(nowIso) || Date.now());
 
-  // Rehydrate any locally stored images so Firestore receives proof images, bank logos, and dream images
+  // Rehydrate any locally stored images so Server Mirror & Firestore receive proof images, bank logos, and dream images
   const enrichedVault: UserVaultData = {
     ...vault,
     updatedAt: nowIso,
@@ -930,6 +1081,11 @@ export async function saveUserCloudVault(vault: UserVaultData): Promise<void> {
       imageUrl: dv.imageUrl || loadProofImageLocally(`dream-img-${dv.id}`),
     })),
   };
+
+  // Always persist to Server Mirror immediately so any operation (add/edit/delete) is saved on disk right away
+  await pushToServerMirror({ vault: enrichedVault });
+
+  if (!canCallFirestoreNow()) return;
 
   let vaultJson = JSON.stringify(enrichedVault);
 
@@ -984,7 +1140,7 @@ export async function saveUserCloudVault(vault: UserVaultData): Promise<void> {
       updatedAt: serverTimestamp(),
     });
   } catch (error) {
-    console.warn('Failed to sync user vault to cloud:', error);
+    markQuotaExhaustedIfMatched(error);
   }
 }
 

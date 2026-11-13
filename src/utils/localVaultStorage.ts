@@ -10,6 +10,7 @@ import {
   hashSecretIrreversibly,
   resolveFlexibleLabel,
 } from './financeRules';
+import { getCanonicalSeedUsers, getCanonicalSeedVault } from './canonicalCloudSeed';
 
 // Bumped to v2 so all entries start initially empty without leftover demo cache
 const USERS_STORAGE_KEY = 'pocketledger_users_v2';
@@ -219,6 +220,9 @@ export function deleteProofImageLocally(proofId?: string): void {
 
 export function loadUsersFromLocal(): UserAccount[] {
   const deletedIds = new Set(loadDeletedUserIdsFromLocal());
+  const canonicalSeeds = getCanonicalSeedUsers().filter(
+    (u) => u.id === 'user-admin' || !deletedIds.has(u.id)
+  );
   try {
     const raw = localStorage.getItem(USERS_STORAGE_KEY);
     if (raw) {
@@ -249,8 +253,20 @@ export function loadUsersFromLocal(): UserAccount[] {
                 u.avatarThumbnailDataUrl || loadProofImageLocally(`user-avatar-${u.id}`),
             };
           });
+        // Ensure canonical real users (koustubh, Tejashree, admin) are never lost if localStorage only had defaultAdmin
+        const existingIds = new Set(filtered.map((u) => u.id));
+        for (const seedUser of canonicalSeeds) {
+          if (!existingIds.has(seedUser.id)) {
+            filtered.push({
+              ...seedUser,
+              avatarThumbnailDataUrl:
+                seedUser.avatarThumbnailDataUrl ||
+                loadProofImageLocally(`user-avatar-${seedUser.id}`),
+            });
+          }
+        }
         const { users: sanitized, upgraded } = ensureZeroKnowledgeUsers(filtered);
-        if (upgraded || filtered.length !== parsed.length) {
+        if (upgraded || sanitized.length !== parsed.length) {
           localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(sanitized));
         }
         if (sanitized.length > 0) {
@@ -262,20 +278,12 @@ export function loadUsersFromLocal(): UserAccount[] {
     // fallback below
   }
 
-  const defaultAdmin: UserAccount = {
-    id: 'user-admin',
-    username: 'admin',
-    displayName: 'Administrator Portal',
-    passwordHash: hashSecretIrreversibly('admin'), // irreversible salted SHA-256 hash
-    role: 'admin',
-    email: DEFAULT_PRIMARY_ADMIN_EMAIL,
-    createdAt: '1970-01-01T00:00:00.000Z',
-    updatedAt: '1970-01-01T00:00:00.000Z',
-    currency: '₹',
-    customCategories: [],
-  };
-
-  return [defaultAdmin];
+  try {
+    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(canonicalSeeds));
+  } catch {
+    // ignore
+  }
+  return canonicalSeeds;
 }
 
 export function hasVaultContent(vault?: UserVaultData | null): boolean {
@@ -451,10 +459,22 @@ export function loadUserVault(userId: string, _seedDemoIfEmpty = false): UserVau
       if (!parsed.updatedAt) {
         parsed.updatedAt = '1970-01-01T00:00:00.000Z';
       }
-      return parsed;
+      if (hasVaultContent(parsed)) {
+        return parsed;
+      }
     }
   } catch {
     // fallback
+  }
+
+  const canonicalSeedVault = getCanonicalSeedVault(userId);
+  if (canonicalSeedVault) {
+    try {
+      localStorage.setItem(key, JSON.stringify(canonicalSeedVault));
+    } catch {
+      // ignore
+    }
+    return canonicalSeedVault;
   }
 
   const emptyVault: UserVaultData = {

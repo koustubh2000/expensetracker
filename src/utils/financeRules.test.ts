@@ -1590,4 +1590,43 @@ test('ensureZeroKnowledgeUsers strips polluted test accounts and preserves canon
   assert.equal(tejashree.passwordHash, realTejashreeHash);
 });
 
+import { getCanonicalSeedUsers, getCanonicalSeedVault } from './canonicalCloudSeed';
+import { loadUsersFromLocal, loadUserVault } from './localVaultStorage';
 
+test('getCanonicalSeedUsers and getCanonicalSeedVault restore admin, koustubh, Tejashree, and all 18 koustubh records', () => {
+  const seedUsers = getCanonicalSeedUsers();
+  assert.equal(seedUsers.length, 3);
+  assert.ok(seedUsers.some((u) => u.username === 'admin' && u.id === 'user-admin'));
+  assert.ok(
+    seedUsers.some(
+      (u) =>
+        u.username === 'koustubh' &&
+        u.id === 'user-1794238795911' &&
+        u.passwordHash.startsWith('zk_sha256_v1$63c3f5e334ab41f9$')
+    )
+  );
+  assert.ok(
+    seedUsers.some(
+      (u) =>
+        u.username === 'Tejashree' &&
+        u.id === 'user-1794219602604' &&
+        u.passwordHash.startsWith('zk_sha256_v1$bafed41034ab425f$')
+    )
+  );
+
+  const kVault = getCanonicalSeedVault('user-1794238795911');
+  assert.ok(kVault);
+  assert.equal(kVault.accounts.length, 3);
+  assert.equal(kVault.dreamVaults.length, 2);
+  assert.equal(kVault.transactions.length, 18);
+  assert.equal(kVault.people.length, 4);
+
+  const loadedUsers = loadUsersFromLocal();
+  assert.ok(loadedUsers.some((u) => u.username === 'koustubh'));
+  assert.ok(loadedUsers.some((u) => u.username === 'Tejashree'));
+
+  const loadedKVault = loadUserVault('user-1794238795911');
+  assert.equal(loadedKVault.accounts.length, 3);
+  assert.equal(loadedKVault.transactions.length, 18);
+  assert.equal(loadedKVault.dreamVaults.length, 2);
+});
