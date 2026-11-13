@@ -230,29 +230,11 @@ export function loadUsersFromLocal(): UserAccount[] {
       if (Array.isArray(parsed) && parsed.length > 0) {
         const filtered = parsed
           .filter((u) => u && (u.id === 'user-admin' || !deletedIds.has(u.id)))
-          .map((u) => {
-            const isTestLock =
-              u.lockoutUntilMs === 1794492551374 ||
-              u.activeSessionToken === 'sess-1794500819003-qymg5q6';
-            return {
-              ...u,
-              ...(isTestLock
-                ? {
-                    passwordFailedAttempts: 0,
-                    consecutiveFailedAttempts: 0,
-                    lockoutTier: 0 as const,
-                    lockoutUntilMs: undefined,
-                    pinFailedAttempts: 0,
-                    pinLockedOut: false,
-                    permanentlyLockedByStrikes: false,
-                    activeSessionToken: undefined,
-                    activeSessionLastSeenAt: undefined,
-                  }
-                : {}),
-              avatarThumbnailDataUrl:
-                u.avatarThumbnailDataUrl || loadProofImageLocally(`user-avatar-${u.id}`),
-            };
-          });
+          .map((u) => ({
+            ...u,
+            avatarThumbnailDataUrl:
+              u.avatarThumbnailDataUrl || loadProofImageLocally(`user-avatar-${u.id}`),
+          }));
         // Ensure canonical real users (koustubh, Tejashree, admin) are never lost if localStorage only had defaultAdmin
         const existingIds = new Set(filtered.map((u) => u.id));
         for (const seedUser of canonicalSeeds) {
@@ -323,21 +305,11 @@ export function saveUsersToLocal(users: UserAccount[], markLocalChange = true): 
 }
 
 export function loadActiveSessionUserId(): string | null {
-  if (typeof window !== 'undefined') {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('autostart') === '1') {
-      return 'user-admin';
-    }
-  }
   const saved = localStorage.getItem(SESSION_STORAGE_KEY);
-  if (saved === 'user-verify-inv') {
-    localStorage.setItem(SESSION_STORAGE_KEY, 'user-1794238795911');
-    localStorage.removeItem(`${VAULT_PREFIX}user-verify-inv`);
-    return 'user-1794238795911';
-  }
   if (
     saved &&
-    (saved === 'user-smooth-test' ||
+    (saved === 'user-verify-inv' ||
+      saved === 'user-smooth-test' ||
       saved.startsWith('user-1794417') ||
       saved.startsWith('user-179447'))
   ) {

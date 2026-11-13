@@ -828,6 +828,8 @@ export function formatCooldownTimerMMSS(remainingMs: number): string {
 export interface PinAttemptEvaluationResult {
   success: boolean;
   updatedUser: UserAccount;
+  hadPriorFailedAttemptsOrLock?: boolean;
+  priorFailedAttemptsCount?: number;
   remainingPinAttempts: number;
   forcePasswordFallback: boolean;
   triggerIntrusionAlert: boolean;
@@ -988,6 +990,18 @@ function generateSaltHex(): string {
   return `${randA}${randB}`;
 }
 
+function computeSaltedSha256Hash(plainSecret: string, customSalt?: string): string {
+  const cleanSalt =
+    (customSalt || generateSaltHex()).replace(/[^a-fA-F0-9]/g, '').slice(0, 16) ||
+    'a1b2c3d4e5f60718';
+  let digest = sha256Hex(`expensetracker_zk_v1:${cleanSalt}:${plainSecret}`);
+  // 64 rounds of salted SHA-256 key stretching
+  for (let r = 0; r < 64; r++) {
+    digest = sha256Hex(`${cleanSalt}:${r}:${digest}:${plainSecret}`);
+  }
+  return `${ZK_HASH_PREFIX}${cleanSalt}$${digest}`;
+}
+
 /**
  * Hashes a secret (password, temporary password, PIN, or OTP) with a 16-char hex salt
  * and multi-round SHA-256 key stretching so it can never be reversed or read in plaintext.
@@ -999,13 +1013,7 @@ export function hashSecretIrreversibly(plainSecret: string, customSalt?: string)
   if (plainSecret === 'google-oauth' || plainSecret === '__non_existent_hash__') {
     return plainSecret;
   }
-  const cleanSalt = (customSalt || generateSaltHex()).replace(/[^a-fA-F0-9]/g, '').slice(0, 16) || 'a1b2c3d4e5f60718';
-  let digest = sha256Hex(`expensetracker_zk_v1:${cleanSalt}:${plainSecret}`);
-  // 64 rounds of salted SHA-256 key stretching
-  for (let r = 0; r < 64; r++) {
-    digest = sha256Hex(`${cleanSalt}:${r}:${digest}:${plainSecret}`);
-  }
-  return `${ZK_HASH_PREFIX}${cleanSalt}$${digest}`;
+  return computeSaltedSha256Hash(plainSecret, customSalt);
 }
 
 /**
@@ -1023,6 +1031,7 @@ function constantTimeEqual(a: string, b: string): boolean {
 /**
  * Verifies a plaintext password, PIN, or OTP against a stored irreversible hash
  * (with seamless migration compatibility if a legacy unhashed string is encountered).
+ * Strictly blocks Pass-the-Hash attempts (pasting a `zk_sha256_v1$...` string as plaintext).
  */
 export function verifySecretAgainstStoredHash(
   plainAttempt: string,
@@ -1032,12 +1041,16 @@ export function verifySecretAgainstStoredHash(
   if (storedValue === '__non_existent_hash__' || storedValue === 'google-oauth') {
     return false;
   }
+  // Block Pass-the-Hash: raw hash strings are never valid plaintext password inputs
+  if (isIrreversibleHash(plainAttempt.trim())) {
+    return false;
+  }
   if (isIrreversibleHash(storedValue)) {
     const rest = storedValue.slice(ZK_HASH_PREFIX.length);
     const sepIdx = rest.indexOf('$');
     if (sepIdx <= 0) return false;
     const salt = rest.slice(0, sepIdx);
-    const expectedFull = hashSecretIrreversibly(plainAttempt, salt);
+    const expectedFull = computeSaltedSha256Hash(plainAttempt, salt);
     return constantTimeEqual(expectedFull, storedValue);
   }
   return constantTimeEqual(plainAttempt, storedValue);
@@ -1129,7 +1142,7 @@ export function ensureZeroKnowledgeUsers(users: UserAccount[]): {
     return !polluted;
   });
 
-  // Deduplicate by lowercase username, always preferring canonical user IDs or earliest createdAt
+  // Deduplicate by lowercase username, preferring canonical user IDs and newest updatedAt
   const byUsername = new Map<string, UserAccount>();
   for (const rawUser of filtered) {
     const res = ensureZeroKnowledgeUserCredentials(rawUser);
@@ -1148,9 +1161,9 @@ export function ensureZeroKnowledgeUsers(users: UserAccount[]): {
       } else if (!candidateIsCanonical && existingIsCanonical) {
         // keep existing
       } else {
-        const cCreated = Date.parse(candidate.createdAt || '') || Number.MAX_SAFE_INTEGER;
-        const eCreated = Date.parse(existing.createdAt || '') || Number.MAX_SAFE_INTEGER;
-        if (cCreated < eCreated) {
+        const cUpdated = Date.parse(candidate.updatedAt || candidate.createdAt || '') || 0;
+        const eUpdated = Date.parse(existing.updatedAt || existing.createdAt || '') || 0;
+        if (cUpdated > eUpdated) {
           byUsername.set(key, candidate);
         }
       }
@@ -1204,6 +1217,7 @@ export function generateAdminEmailOtpChallenge(
 
   const updatedAdmin: UserAccount = {
     ...adminUser,
+    updatedAt: new Date(nowMs).toISOString(),
     email: targetEmail,
     adminOtpHash: otpHash,
     adminOtpExpiresAtMs: expiresAtMs,
@@ -1282,6 +1296,7 @@ export function verifyAdminEmailOtpChallenge(params: {
 
   const updatedAdmin: UserAccount = {
     ...adminUser,
+    updatedAt: new Date(nowMs).toISOString(),
     passwordHash: nextPasswordHash,
     adminOtpHash: undefined,
     adminOtpExpiresAtMs: undefined,
@@ -1292,6 +1307,10 @@ export function verifyAdminEmailOtpChallenge(params: {
     lockoutTier: 0,
     lockoutUntilMs: undefined,
     permanentlyLockedByStrikes: false,
+    securityAlertUnread: false,
+    supportMessages: (adminUser.supportMessages || []).filter(
+      (m) => m.messageType !== 'security_login_alert'
+    ),
     accountStatus: 'active',
     tempPassword: undefined,
     tempPasswordValidForFirstLogin: false,
@@ -1339,19 +1358,39 @@ export function evaluatePinLoginAttempt(
   }
 
   const cleanEntered = (enteredPin || '').trim();
+  const priorFailedCount = Math.max(
+    (user.passwordFailedAttempts || 0) + (user.pinFailedAttempts || 0),
+    user.consecutiveFailedAttempts || 0
+  );
+  const hadPriorFailedAttemptsOrLock =
+    priorFailedCount > 0 ||
+    (user.lockoutTier || 0) > 0 ||
+    Boolean(user.lockoutUntilMs) ||
+    Boolean(user.pinLockedOut) ||
+    Boolean(user.securityAlertUnread);
+
   if (user.mobilePin && verifySecretAgainstStoredHash(cleanEntered, user.mobilePin)) {
     const resetUser: UserAccount = {
       ...user,
-      mobilePin: hashSecretIrreversibly(cleanEntered),
+      updatedAt: new Date(nowMs).toISOString(),
+      mobilePin: isIrreversibleHash(user.mobilePin)
+        ? user.mobilePin
+        : hashSecretIrreversibly(cleanEntered),
       pinFailedAttempts: 0,
       pinLockedOut: false,
       passwordFailedAttempts: 0,
       consecutiveFailedAttempts: 0,
       lockoutTier: 0,
       lockoutUntilMs: undefined,
+      securityAlertUnread: false,
+      supportMessages: (user.supportMessages || []).filter(
+        (m) => m.messageType !== 'security_login_alert'
+      ),
     };
     return {
       success: true,
+      hadPriorFailedAttemptsOrLock,
+      priorFailedAttemptsCount: priorFailedCount,
       updatedUser: resetUser,
       remainingPinAttempts: PIN_MAX_STRIKES,
       forcePasswordFallback: false,
@@ -1384,6 +1423,7 @@ export function evaluatePinLoginAttempt(
 
   const updatedUser: UserAccount = {
     ...user,
+    updatedAt: new Date(nowMs).toISOString(),
     pinFailedAttempts: nextPinStrikes,
     pinLockedOut: forcePasswordFallback,
     consecutiveFailedAttempts: nextConsecutive,
@@ -1411,6 +1451,8 @@ export function evaluatePinLoginAttempt(
 export interface PasswordAttemptEvaluationResult {
   success: boolean;
   usedTempPassword?: boolean;
+  hadPriorFailedAttemptsOrLock?: boolean;
+  priorFailedAttemptsCount?: number;
   updatedUser: UserAccount;
   remainingAttempts: number;
   isCooldownActive: boolean;
@@ -1424,12 +1466,15 @@ export interface PasswordAttemptEvaluationResult {
 
 /**
  * Evaluates a Username + Password login attempt with the Multi-Tier Lockout State Machine:
+ * - Strictly verifies `enteredPassword` ONLY against `user.passwordHash` (or 1-time `tempPassword` for non-admin customer resets).
  * - Tier 1 (5 Strikes): Tracks remaining attempts (4..1). Upon the 5th failed attempt, locks the login form
  *   for 5 minutes (`lockoutUntilMs = nowMs + cooldownDurationMs`) and triggers the security intrusion alert.
  * - Cooldown active: While `nowMs < lockoutUntilMs`, blocks login and returns live `cooldownRemainingMs`.
  * - Tier 2 (3 Strikes Post-Cooldown): After the 5-minute cooldown expires, allows login attempts again in Tier 2.
  *   If the password fails 3 more consecutive times, permanently locks the account (`permanentlyLockedByStrikes = true`,
  *   `accountStatus = 'disabled'`), disables login inputs, and returns `PERMANENT_LOCKOUT_ALERT_MESSAGE`.
+ * - Upon successful login after prior failed attempts/lock, sets `hadPriorFailedAttemptsOrLock = true` so a security warning
+ *   is shown for the current session while resetting all attempt counters for the next login after log off.
  */
 export function evaluatePasswordLoginAttempt(
   user: UserAccount,
@@ -1482,20 +1527,21 @@ export function evaluatePasswordLoginAttempt(
       ? 0 // Reset counter to 0 for the 3 post-cooldown strikes once timer expires
       : user.passwordFailedAttempts || 0;
 
-  const matchesStoredPrimary = verifySecretAgainstStoredHash(enteredPassword, user.passwordHash);
-  const matchesAdminOwnerPassword =
-    user.id === 'user-admin' &&
-    (verifySecretAgainstStoredHash(
-      enteredPassword,
-      'zk_sha256_v1$63c3f5e334ab41f9$1760054e028cf9507cc6c80bdfc1a533665ccb91e25c55465190e767e3536223'
-    ) ||
-      verifySecretAgainstStoredHash(
-        enteredPassword,
-        'zk_sha256_v1$bafed41034ab425f$c85ba80986c033607280ee78a9fe4dd1645a7a633c70b1059f2f0381ffda0bb9'
-      ) ||
-      enteredPassword.trim().toLowerCase() === 'admin');
-  const matchesPrimaryPassword = matchesStoredPrimary || matchesAdminOwnerPassword;
+  const priorFailedCount = Math.max(
+    (user.passwordFailedAttempts || 0) + (user.pinFailedAttempts || 0),
+    user.consecutiveFailedAttempts || 0
+  );
+  const hadPriorFailedAttemptsOrLock =
+    priorFailedCount > 0 ||
+    (user.lockoutTier || 0) > 0 ||
+    Boolean(user.lockoutUntilMs) ||
+    Boolean(user.pinLockedOut) ||
+    Boolean(user.securityAlertUnread);
+
+  // Strict single-password verification: every account (including admin) authenticates ONLY against its own passwordHash
+  const matchesPrimaryPassword = verifySecretAgainstStoredHash(enteredPassword, user.passwordHash);
   const matchesOneTimeTemp =
+    user.role !== 'admin' &&
     Boolean(user.tempPasswordValidForFirstLogin) &&
     Boolean(user.tempPassword) &&
     verifySecretAgainstStoredHash(enteredPassword.trim(), user.tempPassword);
@@ -1506,8 +1552,9 @@ export function evaluatePasswordLoginAttempt(
     );
     const resetUser: UserAccount = {
       ...user,
+      updatedAt: new Date(nowMs).toISOString(),
       passwordHash:
-        matchesStoredPrimary && isIrreversibleHash(user.passwordHash) && !matchesOneTimeTemp
+        matchesPrimaryPassword && isIrreversibleHash(user.passwordHash) && !matchesOneTimeTemp
           ? user.passwordHash
           : hashedEntered,
       pinFailedAttempts: 0,
@@ -1517,6 +1564,10 @@ export function evaluatePasswordLoginAttempt(
       lockoutTier: 0,
       lockoutUntilMs: undefined,
       permanentlyLockedByStrikes: false,
+      securityAlertUnread: false,
+      supportMessages: (user.supportMessages || []).filter(
+        (m) => m.messageType !== 'security_login_alert'
+      ),
       ...(matchesOneTimeTemp
         ? {
             tempPassword: undefined,
@@ -1530,6 +1581,8 @@ export function evaluatePasswordLoginAttempt(
     return {
       success: true,
       usedTempPassword: matchesOneTimeTemp,
+      hadPriorFailedAttemptsOrLock,
+      priorFailedAttemptsCount: priorFailedCount,
       updatedUser: resetUser,
       remainingAttempts: PASSWORD_TIER1_MAX_STRIKES,
       isCooldownActive: false,
@@ -1568,6 +1621,7 @@ export function evaluatePasswordLoginAttempt(
     if (nextStrikes >= PASSWORD_TIER2_MAX_STRIKES) {
       const lockedUser: UserAccount = {
         ...user,
+        updatedAt: new Date(nowMs).toISOString(),
         passwordFailedAttempts: nextStrikes,
         consecutiveFailedAttempts: nextConsecutive,
         lockoutTier: 2,
@@ -1598,6 +1652,7 @@ export function evaluatePasswordLoginAttempt(
 
     const updatedTier2User: UserAccount = {
       ...user,
+      updatedAt: new Date(nowMs).toISOString(),
       passwordFailedAttempts: nextStrikes,
       consecutiveFailedAttempts: nextConsecutive,
       lockoutTier: 1,
@@ -1628,6 +1683,7 @@ export function evaluatePasswordLoginAttempt(
     const lockoutUntilMs = nowMs + cooldownDurationMs;
     const cooldownUser: UserAccount = {
       ...user,
+      updatedAt: new Date(nowMs).toISOString(),
       passwordFailedAttempts: nextStrikes,
       consecutiveFailedAttempts: nextConsecutive,
       lockoutTier: 1,
@@ -1655,6 +1711,7 @@ export function evaluatePasswordLoginAttempt(
 
   const updatedTier1User: UserAccount = {
     ...user,
+    updatedAt: new Date(nowMs).toISOString(),
     passwordFailedAttempts: nextStrikes,
     consecutiveFailedAttempts: nextConsecutive,
     lockoutTier: 0,

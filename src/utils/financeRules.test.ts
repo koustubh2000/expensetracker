@@ -1695,4 +1695,67 @@ test('serializeHeroImagesPayload and parseHeroImagesPayload preserve multi-photo
   assert.equal(schedAbout.rows[0].emiAmount, 20500);
 });
 
+test('Strict Single-Password Authentication: admin rejects alternate passwords and Pass-the-Hash strings, and failed attempts / lock trigger one-time warning then reset to 0', () => {
+  const seedUsers = getCanonicalSeedUsers();
+  const adminUser = seedUsers.find((u) => u.id === 'user-admin')!;
+  const koustubhUser = seedUsers.find((u) => u.username === 'koustubh')!;
+  const tejashreeUser = seedUsers.find((u) => u.username === 'Tejashree')!;
+
+  // 1. Pass-the-Hash attack is strictly blocked for all accounts
+  assert.equal(verifySecretAgainstStoredHash(adminUser.passwordHash, adminUser.passwordHash), false);
+  assert.equal(
+    verifySecretAgainstStoredHash(koustubhUser.passwordHash, koustubhUser.passwordHash),
+    false
+  );
+  assert.equal(
+    verifySecretAgainstStoredHash(tejashreeUser.passwordHash, tejashreeUser.passwordHash),
+    false
+  );
+
+  // 2. Admin can ONLY log in with its single stored password ('admin'), and rejects koustubh/Tejashree hashes or wrong passwords
+  const wrongAttempt1 = evaluatePasswordLoginAttempt(adminUser, 'WrongAdminPass123', 1000);
+  assert.equal(wrongAttempt1.success, false);
+  assert.equal(wrongAttempt1.remainingAttempts, 4);
+
+  const hashPasteAttempt = evaluatePasswordLoginAttempt(
+    wrongAttempt1.updatedUser,
+    koustubhUser.passwordHash,
+    2000
+  );
+  assert.equal(hashPasteAttempt.success, false);
+  assert.equal(hashPasteAttempt.remainingAttempts, 3);
+
+  // 3. Trigger 5-strike lock on admin, wait for cooldown, then log in with correct password ('admin')
+  let lockedAdmin = hashPasteAttempt.updatedUser;
+  for (let i = 0; i < 3; i++) {
+    const res = evaluatePasswordLoginAttempt(lockedAdmin, `wrong-${i}`, 3000 + i * 1000, 5000);
+    lockedAdmin = res.updatedUser;
+  }
+  assert.equal(lockedAdmin.lockoutTier, 1);
+  assert.ok(lockedAdmin.lockoutUntilMs && lockedAdmin.lockoutUntilMs > 5000);
+
+  // After cooldown expires (t = 15000), logging in with the single valid password ('admin') succeeds,
+  // flags hadPriorFailedAttemptsOrLock = true (to show warning), and resets all attempt counters to 0
+  const validAfterLock = evaluatePasswordLoginAttempt(lockedAdmin, 'admin', 15000, 5000);
+  assert.equal(validAfterLock.success, true);
+  assert.equal(validAfterLock.hadPriorFailedAttemptsOrLock, true);
+  assert.equal(validAfterLock.updatedUser.passwordFailedAttempts, 0);
+  assert.equal(validAfterLock.updatedUser.consecutiveFailedAttempts, 0);
+  assert.equal(validAfterLock.updatedUser.lockoutTier, 0);
+  assert.equal(validAfterLock.updatedUser.lockoutUntilMs, undefined);
+  assert.equal(validAfterLock.updatedUser.securityAlertUnread, false);
+
+  // 4. Next login after logoff has 0 prior attempts and hadPriorFailedAttemptsOrLock = false (no warning shown)
+  const cleanNextLogin = evaluatePasswordLoginAttempt(
+    validAfterLock.updatedUser,
+    'admin',
+    20000,
+    5000
+  );
+  assert.equal(cleanNextLogin.success, true);
+  assert.equal(cleanNextLogin.hadPriorFailedAttemptsOrLock, false);
+  assert.equal(cleanNextLogin.priorFailedAttemptsCount, 0);
+});
+
+
 

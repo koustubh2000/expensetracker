@@ -407,6 +407,20 @@ export async function saveGlobalCloudConfig(
   }
 }
 
+function pickNewerUserRecord(existing: UserAccount, incoming: UserAccount): UserAccount {
+  const eTime = Date.parse(existing.updatedAt || existing.createdAt || '1970-01-01T00:00:00.000Z') || 0;
+  const iTime = Date.parse(incoming.updatedAt || incoming.createdAt || '1970-01-01T00:00:00.000Z') || 0;
+  const winner = iTime >= eTime ? incoming : existing;
+  const loser = iTime >= eTime ? existing : incoming;
+  return {
+    ...winner,
+    avatarThumbnailDataUrl:
+      winner.avatarThumbnailDataUrl ||
+      loser.avatarThumbnailDataUrl ||
+      loadProofImageLocally(`user-avatar-${winner.id}`),
+  };
+}
+
 function mergeUserListsSafely(
   primaryUsers: UserAccount[],
   secondaryUsers: UserAccount[],
@@ -422,26 +436,38 @@ function mergeUserListsSafely(
     }
   }
 
-  // 2. Layer secondary users
+  // 2. Merge secondary users by newest updatedAt
   for (const u of secondaryUsers) {
     if (!u || !u.id || !u.username || isPollutedTestUser(u)) continue;
     if (u.id !== 'user-admin' && deletedIds.has(u.id)) continue;
-    byId.set(u.id, {
-      ...u,
-      avatarThumbnailDataUrl:
-        u.avatarThumbnailDataUrl || loadProofImageLocally(`user-avatar-${u.id}`),
-    });
+    const prev = byId.get(u.id);
+    byId.set(
+      u.id,
+      prev
+        ? pickNewerUserRecord(prev, u)
+        : {
+            ...u,
+            avatarThumbnailDataUrl:
+              u.avatarThumbnailDataUrl || loadProofImageLocally(`user-avatar-${u.id}`),
+          }
+    );
   }
 
-  // 3. Layer primary (authoritative) users
+  // 3. Merge primary users by newest updatedAt
   for (const u of primaryUsers) {
     if (!u || !u.id || !u.username || isPollutedTestUser(u)) continue;
     if (u.id !== 'user-admin' && deletedIds.has(u.id)) continue;
-    byId.set(u.id, {
-      ...u,
-      avatarThumbnailDataUrl:
-        u.avatarThumbnailDataUrl || loadProofImageLocally(`user-avatar-${u.id}`),
-    });
+    const prev = byId.get(u.id);
+    byId.set(
+      u.id,
+      prev
+        ? pickNewerUserRecord(prev, u)
+        : {
+            ...u,
+            avatarThumbnailDataUrl:
+              u.avatarThumbnailDataUrl || loadProofImageLocally(`user-avatar-${u.id}`),
+          }
+    );
   }
 
   const merged = Array.from(byId.values());
@@ -485,11 +511,15 @@ export function subscribeToCloudUsers(callbacks: {
         if (typeof data.userJson === 'string') {
           try {
             const parsed = JSON.parse(data.userJson) as UserAccount;
+            if (isPollutedTestUser(parsed)) {
+              deleteDoc(doc(db, 'appUsers', d.id)).catch(() => {});
+              deleteDoc(doc(db, 'userVaults', d.id)).catch(() => {});
+              continue;
+            }
             if (
               parsed &&
               parsed.id &&
               parsed.username &&
-              !isPollutedTestUser(parsed) &&
               (parsed.id === 'user-admin' || !deletedIds.has(parsed.id))
             ) {
               cloudUsersList.push({
@@ -552,11 +582,15 @@ export async function fetchCloudUsersFromServer(
           if (typeof data.userJson === 'string') {
             try {
               const parsed = JSON.parse(data.userJson) as UserAccount;
+              if (isPollutedTestUser(parsed)) {
+                deleteDoc(doc(db, 'appUsers', d.id)).catch(() => {});
+                deleteDoc(doc(db, 'userVaults', d.id)).catch(() => {});
+                continue;
+              }
               if (
                 parsed &&
                 parsed.id &&
                 parsed.username &&
-                !isPollutedTestUser(parsed) &&
                 (parsed.id === 'user-admin' || !deletedIds.has(parsed.id))
               ) {
                 cloudUsersList.push({

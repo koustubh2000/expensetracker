@@ -8,6 +8,7 @@ import {
   CANONICAL_KOUSTUBH_VAULT,
   getCanonicalSeedUsers,
 } from './src/utils/canonicalCloudSeed';
+import { isPollutedTestUser } from './src/utils/financeRules';
 
 const MIRROR_FILE_PATH = path.resolve(__dirname, '.cloud-vault-mirror.json');
 
@@ -22,6 +23,15 @@ interface CloudMirrorStore {
   };
 }
 
+function pickNewerMirrorUser(existing: any, incoming: any): any {
+  const existingTs = existing?.updatedAt ? Date.parse(existing.updatedAt) : 0;
+  const incomingTs = incoming?.updatedAt ? Date.parse(incoming.updatedAt) : 0;
+  if (!Number.isNaN(existingTs) && !Number.isNaN(incomingTs) && existingTs > incomingTs) {
+    return existing;
+  }
+  return incoming;
+}
+
 function loadMirrorStore(): CloudMirrorStore {
   try {
     if (fs.existsSync(MIRROR_FILE_PATH)) {
@@ -29,7 +39,7 @@ function loadMirrorStore(): CloudMirrorStore {
       const parsed = JSON.parse(raw) as CloudMirrorStore;
       if (parsed && Array.isArray(parsed.users) && parsed.vaults) {
         return {
-          users: parsed.users,
+          users: parsed.users.filter((u: any) => u && !isPollutedTestUser(u)),
           deletedUserIds: Array.isArray(parsed.deletedUserIds) ? parsed.deletedUserIds : [],
           vaults: parsed.vaults,
           globalConfig:
@@ -87,9 +97,19 @@ function cloudVaultMirrorPlugin(): Plugin {
               const store = loadMirrorStore();
               if (Array.isArray(payload.users)) {
                 const deletedSet = new Set(store.deletedUserIds || []);
-                store.users = payload.users.filter(
-                  (u: any) => u && (u.id === 'user-admin' || !deletedSet.has(u.id))
-                );
+                const byId = new Map<string, any>();
+                for (const u of store.users || []) {
+                  if (u && u.id && !isPollutedTestUser(u) && (u.id === 'user-admin' || !deletedSet.has(u.id))) {
+                    byId.set(u.id, u);
+                  }
+                }
+                for (const inc of payload.users) {
+                  if (!inc || !inc.id || isPollutedTestUser(inc)) continue;
+                  if (inc.id !== 'user-admin' && deletedSet.has(inc.id)) continue;
+                  const prev = byId.get(inc.id);
+                  byId.set(inc.id, prev ? pickNewerMirrorUser(prev, inc) : inc);
+                }
+                store.users = Array.from(byId.values());
               }
               if (typeof payload.deleteUserId === 'string' && payload.deleteUserId !== 'user-admin') {
                 const delId = payload.deleteUserId;

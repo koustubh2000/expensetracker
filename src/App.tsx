@@ -232,6 +232,7 @@ export default function App() {
   // (Resets on every browser refresh or re-login so the user always sees the On Hold popup first)
   const [holdDismissedForLoadUserId, setHoldDismissedForLoadUserId] = useState<string | null>(null);
   const [isSupportChatOpen, setIsSupportChatOpen] = useState<boolean>(false);
+  const [postLoginSecurityWarning, setPostLoginSecurityWarning] = useState<string | null>(null);
   const [browserSessionToken] = useState<string>(() => getOrCreateBrowserSessionToken());
   const [inactivityRemainingSeconds, setInactivityRemainingSeconds] = useState<number>(120);
   const lastActivityRef = React.useRef<number>(Date.now());
@@ -450,10 +451,14 @@ export default function App() {
 
   const persistUsersChange = (nextUsers: UserAccount[]) => {
     const nowIso = new Date().toISOString();
-    const stamped = nextUsers.map((u) => ({
-      ...u,
-      updatedAt: u.updatedAt || nowIso,
-    }));
+    const stamped = nextUsers.map((u) => {
+      const prev = users.find((p) => p.id === u.id);
+      const changed = !prev || JSON.stringify(prev) !== JSON.stringify(u);
+      return {
+        ...u,
+        updatedAt: changed ? nowIso : u.updatedAt || nowIso,
+      };
+    });
     setUsers(stamped);
     saveUsersToLocal(stamped, true);
     syncUsersToCloud(stamped);
@@ -469,15 +474,17 @@ export default function App() {
     saveUserCloudVault(stampedVault);
   };
 
-  // Auth & Security Handlers (Single-Session Lock + Concurrent Login Alert in Chat with 24h Auto-Delete)
+  // Auth & Security Handlers (Single-Session Lock + Post-Lock Security Warning & Next-Logout Attempt Reset)
   const handleLogin = (
     user: UserAccount,
-    usedOneTimeTempPassword = false
+    usedOneTimeTempPassword = false,
+    hadPriorFailedAttemptsOrLock = false,
+    priorFailedAttemptsCount = 0
   ): { ok: boolean; error?: string } => {
-    const latestUser = users.find((u) => u.id === user.id) || user;
+    const existingInUsers = users.find((u) => u.id === user.id);
 
     // 1. Check if this user is already logged in on another active session
-    if (isUserSessionActiveElsewhere(latestUser, browserSessionToken)) {
+    if (isUserSessionActiveElsewhere(existingInUsers || user, browserSessionToken)) {
       const nowIso = new Date().toISOString();
       const expire24hIso = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
       const securityMsg: SupportChatMessage = {
@@ -490,9 +497,10 @@ export default function App() {
         expiresAt: expire24hIso,
       };
       const nextUsers = users.map((u) =>
-        u.id === latestUser.id
+        u.id === user.id
           ? {
               ...u,
+              updatedAt: nowIso,
               securityAlertUnread: true,
               supportMessages: [...(u.supportMessages || []), securityMsg],
             }
@@ -511,10 +519,24 @@ export default function App() {
     }
 
     const nowIso = new Date().toISOString();
+    // Always use `user` (from pwEval/pinEval) so that all failed attempt counters and temporary locks are cleanly reset to 0
     const updatedUser: UserAccount = {
-      ...latestUser,
+      ...(existingInUsers || {}),
+      ...user,
+      updatedAt: nowIso,
       activeSessionToken: browserSessionToken,
       activeSessionLastSeenAt: nowIso,
+      passwordFailedAttempts: 0,
+      consecutiveFailedAttempts: 0,
+      pinFailedAttempts: 0,
+      pinLockedOut: false,
+      lockoutTier: 0,
+      lockoutUntilMs: undefined,
+      permanentlyLockedByStrikes: false,
+      securityAlertUnread: false,
+      supportMessages: (user.supportMessages || existingInUsers?.supportMessages || []).filter(
+        (m) => m.messageType !== 'security_login_alert'
+      ),
       ...(usedOneTimeTempPassword
         ? {
             tempPassword: undefined,
@@ -525,20 +547,27 @@ export default function App() {
           }
         : {}),
     };
-    const existsInUsers = users.some((u) => u.id === latestUser.id);
+    const existsInUsers = users.some((u) => u.id === updatedUser.id);
     const nextUsers = existsInUsers
-      ? users.map((u) => (u.id === latestUser.id ? updatedUser : u))
+      ? users.map((u) => (u.id === updatedUser.id ? updatedUser : u))
       : [...users, updatedUser];
     persistUsersChange(nextUsers);
 
     if (usedOneTimeTempPassword) {
       setActiveSection('settings');
     }
-    if (
-      updatedUser.securityAlertUnread ||
-      (updatedUser.supportMessages || []).some((m) => m.messageType === 'security_login_alert')
-    ) {
-      setIsSupportChatOpen(true);
+
+    // Show post-login security warning ONLY for this login session if prior failed attempts or a temporary lock occurred
+    if (hadPriorFailedAttemptsOrLock) {
+      const warningText = `Security Warning: ${
+        priorFailedAttemptsCount > 0
+          ? `${priorFailedAttemptsCount} failed password/PIN attempt(s) or a temporary login lock`
+          : 'Failed password attempts or a temporary login lock'
+      } occurred on @${updatedUser.username} before you signed in. All login attempts have now been reset for your next sign-in. If this wasn't you, please update your password.`;
+      setPostLoginSecurityWarning(warningText);
+      triggerFeedback(warningText, 'error', 'toast');
+    } else {
+      setPostLoginSecurityWarning(null);
     }
 
     lastActivityRef.current = Date.now();
@@ -547,11 +576,11 @@ export default function App() {
     setShowAuthGate(false);
     setActiveUserSnapshot(updatedUser);
     saveActiveUserSnapshot(updatedUser);
-    setActiveUserId(latestUser.id);
-    saveActiveSessionUserId(latestUser.id);
-    const initialLocalVault = loadUserVault(latestUser.id, false);
+    setActiveUserId(updatedUser.id);
+    saveActiveSessionUserId(updatedUser.id);
+    const initialLocalVault = loadUserVault(updatedUser.id, false);
     setVault(initialLocalVault);
-    void fetchUserCloudVaultFromServer(latestUser.id, initialLocalVault).then((cloudVault) => {
+    void fetchUserCloudVaultFromServer(updatedUser.id, initialLocalVault).then((cloudVault) => {
       if (cloudVault) {
         setVault(cloudVault);
       }
@@ -648,18 +677,32 @@ export default function App() {
       if (window.location.search.includes('autostart')) {
         window.history.replaceState({}, '', window.location.pathname);
       }
+      setPostLoginSecurityWarning(null);
       if (activeUserId) {
+        const nowIso = new Date().toISOString();
         setUsers((prev) => {
           const next = prev.map((u) =>
             u.id === activeUserId
               ? {
                   ...u,
+                  updatedAt: nowIso,
                   activeSessionToken: undefined,
                   activeSessionLastSeenAt: undefined,
+                  passwordFailedAttempts: 0,
+                  consecutiveFailedAttempts: 0,
+                  pinFailedAttempts: 0,
+                  pinLockedOut: false,
+                  lockoutTier: 0 as const,
+                  lockoutUntilMs: undefined,
+                  permanentlyLockedByStrikes: false,
+                  securityAlertUnread: false,
+                  supportMessages: (u.supportMessages || []).filter(
+                    (m) => m.messageType !== 'security_login_alert'
+                  ),
                 }
               : u
           );
-          saveUsersToLocal(next);
+          saveUsersToLocal(next, true);
           syncUsersToCloud(next);
           return next;
         });
@@ -2864,6 +2907,8 @@ export default function App() {
           onAdminPermanentlyDeleteUser={handleAdminPermanentlyDeleteUser}
           onResetEntirePortal={handleResetEntirePortal}
           onSyncLiveUsersFromFirebase={(refreshedUsers) => setUsers(refreshedUsers)}
+          postLoginSecurityWarning={postLoginSecurityWarning}
+          onDismissPostLoginSecurityWarning={() => setPostLoginSecurityWarning(null)}
           onTriggerFeedback={triggerFeedback}
           onLogout={() => void handleLogout(false)}
         />
@@ -3253,6 +3298,42 @@ export default function App() {
 
       {/* Full-Width Main Workspace Viewport (Maximized Horizontal Real Estate, No Left Sidebar) */}
       <main className="flex-1 p-4 sm:p-6 max-w-[1440px] w-full min-w-0 mx-auto space-y-6 overflow-x-hidden">
+        {/* Session Security Warning if Prior Failed Attempts or Temporary Lock Occurred Before This Login */}
+        {postLoginSecurityWarning && (
+          <div
+            role="alert"
+            data-testid="post-login-security-warning-banner"
+            className="p-4 rounded-2xl bg-amber-500/15 border-2 border-amber-500 text-amber-950 dark:text-amber-100 shadow-lg flex flex-wrap items-center justify-between gap-3 text-xs no-print"
+          >
+            <div className="flex items-start gap-2.5">
+              <ShieldAlert className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <div className="font-extrabold text-sm text-amber-900 dark:text-amber-200">
+                  Prior Failed Login Attempts Detected — Attempts Reset for Next Sign-In
+                </div>
+                <p className="leading-relaxed font-semibold">{postLoginSecurityWarning}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setActiveSection('settings')}
+                className="px-3 py-1.5 rounded-xl border border-amber-500/60 bg-white dark:bg-slate-900 text-amber-800 dark:text-amber-200 font-bold text-xs cursor-pointer"
+              >
+                Change Password
+              </button>
+              <button
+                type="button"
+                data-testid="dismiss-post-login-security-warning-btn"
+                onClick={() => setPostLoginSecurityWarning(null)}
+                className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs cursor-pointer"
+              >
+                Acknowledge &amp; Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Period & Section Subheader (Only rendered on Dashboard and Records to avoid duplicate headers on subviews) */}
         {(activeSection === 'dashboard' || activeSection === 'records') && (
           <div className="flex flex-wrap items-center justify-between gap-4 pb-3 border-b border-slate-200 dark:border-slate-800">

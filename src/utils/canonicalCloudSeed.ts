@@ -7,7 +7,8 @@ export function getCanonicalSeedUsers(): UserAccount[] {
       id: 'user-admin',
       username: 'admin',
       displayName: 'Administrator Portal',
-      passwordHash: hashSecretIrreversibly('admin'),
+      passwordHash:
+        'zk_sha256_v1$4e22aeac2cb3acdc$db195f3a8fca3730681132b51211bbaea07db2f5790d5c6483b44c87f5f1df52',
       role: 'admin',
       email: DEFAULT_PRIMARY_ADMIN_EMAIL,
       createdAt: '1970-01-01T00:00:00.000Z',

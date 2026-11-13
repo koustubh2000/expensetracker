@@ -46,7 +46,9 @@ interface AuthGateProps {
   onBackToLanding: () => void;
   onLogin: (
     user: UserAccount,
-    usedOneTimeTempPassword?: boolean
+    usedOneTimeTempPassword?: boolean,
+    hadPriorFailedAttemptsOrLock?: boolean,
+    priorFailedAttemptsCount?: number
   ) => { ok: boolean; error?: string } | void;
   onUpdateUserSecurityState?: (
     updatedUser: UserAccount,
@@ -87,6 +89,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
   const [password, setPassword] = useState('');
   const [pinInput, setPinInput] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [submittedAttemptUsername, setSubmittedAttemptUsername] = useState<string | null>(null);
   const pinInputRef = useRef<HTMLInputElement | null>(null);
 
   const [error, setError] = useState('');
@@ -127,12 +130,18 @@ export const AuthGate: React.FC<AuthGateProps> = ({
     setUsername('');
     setPassword('');
     setPinInput('');
+    setSubmittedAttemptUsername(null);
+    setIntrusionBanner(null);
+    setError('');
     setShowLoginPassword(false);
     setShowRegPassword(false);
     setShowRegConfirmPassword(false);
   }, [initialMode]);
 
   const cleanUsername = username.trim().toLowerCase();
+  const hasSubmittedForCurrentUsername = Boolean(
+    cleanUsername && submittedAttemptUsername === cleanUsername
+  );
   const matchedLoginUser =
     users.find((u) => u.username.toLowerCase() === cleanUsername) ||
     (cleanUsername ? unmatchedUsersMap[cleanUsername] : undefined);
@@ -153,6 +162,11 @@ export const AuthGate: React.FC<AuthGateProps> = ({
   const cooldownUntilMs = matchedLoginUser?.lockoutUntilMs || 0;
   const isCooldownActive = !isPermanentlyLocked && cooldownUntilMs > nowMs;
   const cooldownRemainingMs = isCooldownActive ? Math.max(0, cooldownUntilMs - nowMs) : 0;
+
+  // Only reveal lockout / cooldown / remaining attempts on the login UI AFTER the user submits for this username
+  const showPermanentLockOnUi = hasSubmittedForCurrentUsername && isPermanentlyLocked;
+  const showCooldownOnUi = hasSubmittedForCurrentUsername && isCooldownActive;
+  const showPinDisabledOnUi = hasSubmittedForCurrentUsername && isPinDisabledForUser;
 
   const isPostCooldownTier2 =
     !isPermanentlyLocked &&
@@ -193,6 +207,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
         if (matchedLoginUser && matchedLoginUser.lockoutUntilMs) {
           const unlockedForTier2: UserAccount = {
             ...matchedLoginUser,
+            updatedAt: new Date(current).toISOString(),
             lockoutUntilMs: undefined,
             passwordFailedAttempts: 0,
             lockoutTier: 1,
@@ -205,22 +220,31 @@ export const AuthGate: React.FC<AuthGateProps> = ({
               [cleanUsername]: unlockedForTier2,
             }));
           }
-          setError(
-            '5-minute security cooldown has expired. You now have 3 password attempts remaining before permanent account lock.'
-          );
+          if (hasSubmittedForCurrentUsername) {
+            setError(
+              '5-minute security cooldown has expired. You now have 3 password attempts remaining before permanent account lock.'
+            );
+          }
         }
         window.clearInterval(interval);
       }
     }, 250);
     return () => window.clearInterval(interval);
-  }, [cooldownUntilMs, matchedLoginUser, users, cleanUsername, onUpdateUserSecurityState]);
+  }, [
+    cooldownUntilMs,
+    matchedLoginUser,
+    users,
+    cleanUsername,
+    hasSubmittedForCurrentUsername,
+    onUpdateUserSecurityState,
+  ]);
 
-  // Force fallback to password mode if PIN is locked out
+  // Force fallback to password mode if PIN is locked out after submit
   useEffect(() => {
-    if (loginMethod === 'pin' && isPinDisabledForUser) {
+    if (loginMethod === 'pin' && showPinDisabledOnUi) {
       setLoginMethod('password');
     }
-  }, [loginMethod, isPinDisabledForUser]);
+  }, [loginMethod, showPinDisabledOnUi]);
 
   const resolveCooldownDurationMs = (): number => {
     if (typeof window !== 'undefined') {
@@ -253,11 +277,11 @@ export const AuthGate: React.FC<AuthGateProps> = ({
 
   const handleSwitchToPinMode = () => {
     setError('');
-    if (isPermanentlyLocked) {
+    if (showPermanentLockOnUi) {
       setError(PERMANENT_LOCKOUT_ALERT_MESSAGE);
       return;
     }
-    if (isPinDisabledForUser) {
+    if (showPinDisabledOnUi) {
       setError(
         'PIN entry has been disabled after 3 failed attempts. Please sign in using your Username and Password.'
       );
@@ -285,6 +309,9 @@ export const AuthGate: React.FC<AuthGateProps> = ({
 
     const currentTs = Date.now();
     setNowMs(currentTs);
+    if (cleanUsername) {
+      setSubmittedAttemptUsername(cleanUsername);
+    }
 
     const knownUser = users.find((u) => u.username.toLowerCase() === cleanUsername);
     const targetUser: UserAccount =
@@ -330,20 +357,26 @@ export const AuthGate: React.FC<AuthGateProps> = ({
       }
 
       const pinEval = evaluatePinLoginAttempt(targetUser, pinInput, currentTs);
-      persistSecurityEvaluation(
-        pinEval.updatedUser,
-        Boolean(knownUser),
-        pinEval.triggerIntrusionAlert ? pinEval.intrusionAlertMessage : undefined
-      );
-
       if (pinEval.success && knownUser) {
         setIntrusionBanner(null);
-        const loginRes = onLogin(pinEval.updatedUser, false);
+        setSubmittedAttemptUsername(null);
+        const loginRes = onLogin(
+          pinEval.updatedUser,
+          false,
+          pinEval.hadPriorFailedAttemptsOrLock,
+          pinEval.priorFailedAttemptsCount
+        );
         if (loginRes && !loginRes.ok && loginRes.error) {
           setError(loginRes.error);
         }
         return;
       }
+
+      persistSecurityEvaluation(
+        pinEval.updatedUser,
+        Boolean(knownUser),
+        pinEval.triggerIntrusionAlert ? pinEval.intrusionAlertMessage : undefined
+      );
 
       setPinInput('');
       if (pinEval.forcePasswordFallback) {
@@ -362,20 +395,26 @@ export const AuthGate: React.FC<AuthGateProps> = ({
       cooldownMs
     );
 
-    persistSecurityEvaluation(
-      pwEval.updatedUser,
-      Boolean(knownUser),
-      pwEval.triggerIntrusionAlert ? pwEval.intrusionAlertMessage : undefined
-    );
-
     if (pwEval.success && knownUser) {
       setIntrusionBanner(null);
-      const loginRes = onLogin(pwEval.updatedUser, Boolean(pwEval.usedTempPassword));
+      setSubmittedAttemptUsername(null);
+      const loginRes = onLogin(
+        pwEval.updatedUser,
+        Boolean(pwEval.usedTempPassword),
+        pwEval.hadPriorFailedAttemptsOrLock,
+        pwEval.priorFailedAttemptsCount
+      );
       if (loginRes && !loginRes.ok && loginRes.error) {
         setError(loginRes.error);
       }
       return;
     }
+
+    persistSecurityEvaluation(
+      pwEval.updatedUser,
+      Boolean(knownUser),
+      pwEval.triggerIntrusionAlert ? pwEval.intrusionAlertMessage : undefined
+    );
 
     setPassword('');
     setError(pwEval.errorMessage || 'Invalid username or password.');
@@ -730,8 +769,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({
               </div>
             </div>
 
-            {/* Security Intrusion Alert Notification (Triggered ONLY when >= 5 consecutive failed attempts occur) */}
-            {intrusionBanner && (
+            {/* Security Intrusion Alert Notification (Triggered ONLY when >= 5 consecutive failed attempts occur after submit) */}
+            {hasSubmittedForCurrentUsername && intrusionBanner && (
               <div
                 role="alert"
                 data-testid="security-intrusion-alert"
@@ -748,7 +787,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
             )}
 
             {/* Tier 2 Permanent Account Lockout Prominent Alert + Direct Admin Support Button */}
-            {mode === 'login' && isPermanentlyLocked && (
+            {mode === 'login' && showPermanentLockOnUi && (
               <div
                 role="alert"
                 data-testid="permanent-lockout-alert"
@@ -778,7 +817,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
             )}
 
             {/* Tier 1 5-Minute Live Cooldown Timer Box */}
-            {mode === 'login' && isCooldownActive && (
+            {mode === 'login' && showCooldownOnUi && (
               <div
                 role="alert"
                 data-testid="tier1-cooldown-timer-banner"
@@ -804,7 +843,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
               </div>
             )}
 
-            {error && !isPermanentlyLocked && (
+            {error && !showPermanentLockOnUi && (
               <div
                 role="alert"
                 data-testid="auth-error-alert"
@@ -832,7 +871,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                 <button
                   type="button"
                   onClick={handleGoogleSignInClick}
-                  disabled={googleLoading || isCooldownActive || isPermanentlyLocked}
+                  disabled={googleLoading || showCooldownOnUi || showPermanentLockOnUi}
                   className="w-full py-2.5 px-4 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed text-slate-900 dark:text-white font-semibold text-sm transition-colors flex items-center justify-center gap-2.5 cursor-pointer"
                 >
                   <Cloud className="w-4 h-4 text-emerald-500" />
@@ -849,7 +888,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                       setLoginMethod('password');
                       setError('');
                     }}
-                    disabled={isCooldownActive || isPermanentlyLocked}
+                    disabled={showCooldownOnUi || showPermanentLockOnUi}
                     className={`py-2 px-3 rounded-lg text-xs font-extrabold flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50 ${
                       loginMethod === 'password'
                         ? 'bg-emerald-600 text-white shadow-xs'
@@ -862,7 +901,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                   <button
                     type="button"
                     onClick={handleSwitchToPinMode}
-                    disabled={isPinDisabledForUser || isCooldownActive || isPermanentlyLocked}
+                    disabled={showPinDisabledOnUi || showCooldownOnUi || showPermanentLockOnUi}
                     data-testid="switch-to-mobile-pin-btn"
                     className={`py-2 px-3 rounded-lg text-xs font-extrabold flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed ${
                       loginMethod === 'pin'
@@ -872,7 +911,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                   >
                     <Smartphone className="w-3.5 h-3.5" />
                     <span>
-                      {isPinDisabledForUser ? 'PIN Disabled (3 Strikes)' : 'Mobile PIN (4–6 Digits)'}
+                      {showPinDisabledOnUi ? 'PIN Disabled (3 Strikes)' : 'Mobile PIN (4–6 Digits)'}
                     </span>
                   </button>
                 </div>
@@ -912,37 +951,45 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                       >
                         Username
                       </label>
-                      {matchedLoginUser && !isPermanentlyLocked && !isCooldownActive && (
-                        <span
-                          data-testid="remaining-attempts-indicator"
-                          className={`text-[11px] font-mono tabular-nums font-bold px-2 py-0.5 rounded ${
-                            loginMethod === 'pin'
-                              ? remainingPinAttempts < PIN_MAX_STRIKES
+                      {hasSubmittedForCurrentUsername &&
+                        matchedLoginUser &&
+                        !showPermanentLockOnUi &&
+                        !showCooldownOnUi && (
+                          <span
+                            data-testid="remaining-attempts-indicator"
+                            className={`text-[11px] font-mono tabular-nums font-bold px-2 py-0.5 rounded ${
+                              loginMethod === 'pin'
+                                ? remainingPinAttempts < PIN_MAX_STRIKES
+                                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                  : 'text-slate-500 dark:text-slate-400'
+                                : isPostCooldownTier2 ||
+                                  remainingPasswordAttempts < PASSWORD_TIER1_MAX_STRIKES
                                 ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                                 : 'text-slate-500 dark:text-slate-400'
-                              : isPostCooldownTier2 ||
-                                remainingPasswordAttempts < PASSWORD_TIER1_MAX_STRIKES
-                              ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                              : 'text-slate-500 dark:text-slate-400'
-                          }`}
-                        >
-                          {loginMethod === 'pin'
-                            ? `PIN Attempts Remaining: ${remainingPinAttempts}/${PIN_MAX_STRIKES}`
-                            : isPostCooldownTier2
-                            ? `Post-Cooldown Attempts Remaining: ${remainingPasswordAttempts}/${PASSWORD_TIER2_MAX_STRIKES}`
-                            : `Password Attempts Remaining: ${remainingPasswordAttempts}/${PASSWORD_TIER1_MAX_STRIKES}`}
-                        </span>
-                      )}
+                            }`}
+                          >
+                            {loginMethod === 'pin'
+                              ? `PIN Attempts Remaining: ${remainingPinAttempts}/${PIN_MAX_STRIKES}`
+                              : isPostCooldownTier2
+                              ? `Post-Cooldown Attempts Remaining: ${remainingPasswordAttempts}/${PASSWORD_TIER2_MAX_STRIKES}`
+                              : `Password Attempts Remaining: ${remainingPasswordAttempts}/${PASSWORD_TIER1_MAX_STRIKES}`}
+                          </span>
+                        )}
                     </div>
                     <input
                       id="login-username"
                       name="vault_manual_id_entry"
                       type="text"
                       value={username}
-                      onChange={(e) => setUsername(e.target.value)}
+                      onChange={(e) => {
+                        setUsername(e.target.value);
+                        setSubmittedAttemptUsername(null);
+                        setError('');
+                        setIntrusionBanner(null);
+                      }}
                       placeholder="Enter your username"
                       required
-                      disabled={isCooldownActive || isPermanentlyLocked}
+                      disabled={showCooldownOnUi || showPermanentLockOnUi}
                       autoComplete="off"
                       autoCorrect="off"
                       autoCapitalize="none"
@@ -981,14 +1028,14 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           placeholder={
-                            isPermanentlyLocked
+                            showPermanentLockOnUi
                               ? 'Account locked by security policy'
-                              : isCooldownActive
+                              : showCooldownOnUi
                               ? `Cooldown active (${formatCooldownTimerMMSS(cooldownRemainingMs)})`
                               : 'Enter your password'
                           }
                           required
-                          disabled={isCooldownActive || isPermanentlyLocked}
+                          disabled={showCooldownOnUi || showPermanentLockOnUi}
                           autoComplete="new-password"
                           autoCorrect="off"
                           autoCapitalize="none"
@@ -1003,7 +1050,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                         <button
                           type="button"
                           onClick={() => setShowLoginPassword((prev) => !prev)}
-                          disabled={isCooldownActive || isPermanentlyLocked}
+                          disabled={showCooldownOnUi || showPermanentLockOnUi}
                           aria-label={
                             showLoginPassword ? 'Hide typed password' : 'Show typed password'
                           }
@@ -1026,10 +1073,12 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                         >
                           Enter Mobile App PIN (4–6 Digits)
                         </label>
-                        <span className="text-[11px] font-mono tabular-nums font-bold text-amber-600 dark:text-amber-400">
-                          {remainingPinAttempts} {remainingPinAttempts === 1 ? 'Strike' : 'Strikes'}{' '}
-                          Left
-                        </span>
+                        {hasSubmittedForCurrentUsername && (
+                          <span className="text-[11px] font-mono tabular-nums font-bold text-amber-600 dark:text-amber-400">
+                            {remainingPinAttempts} {remainingPinAttempts === 1 ? 'Strike' : 'Strikes'}{' '}
+                            Left
+                          </span>
+                        )}
                       </div>
 
                       <input
@@ -1044,7 +1093,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                         onChange={(e) => setPinInput(e.target.value.replace(/[^0-9]/g, ''))}
                         placeholder="••••"
                         required
-                        disabled={isPinDisabledForUser || isCooldownActive || isPermanentlyLocked}
+                        disabled={showPinDisabledOnUi || showCooldownOnUi || showPermanentLockOnUi}
                         autoComplete="new-password"
                         data-lpignore="true"
                         data-1p-ignore="true"
@@ -1058,7 +1107,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                           <button
                             key={digit}
                             type="button"
-                            disabled={isPinDisabledForUser || isCooldownActive || isPermanentlyLocked}
+                            disabled={showPinDisabledOnUi || showCooldownOnUi || showPermanentLockOnUi}
                             onClick={() =>
                               setPinInput((prev) => (prev.length < 6 ? prev + digit : prev))
                             }
@@ -1069,7 +1118,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                         ))}
                         <button
                           type="button"
-                          disabled={isPinDisabledForUser || isCooldownActive || isPermanentlyLocked}
+                          disabled={showPinDisabledOnUi || showCooldownOnUi || showPermanentLockOnUi}
                           onClick={() => setPinInput('')}
                           className="py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800 text-[11px] font-bold text-slate-600 dark:text-slate-300 cursor-pointer disabled:opacity-40"
                         >
@@ -1077,7 +1126,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                         </button>
                         <button
                           type="button"
-                          disabled={isPinDisabledForUser || isCooldownActive || isPermanentlyLocked}
+                          disabled={showPinDisabledOnUi || showCooldownOnUi || showPermanentLockOnUi}
                           onClick={() =>
                             setPinInput((prev) => (prev.length < 6 ? prev + '0' : prev))
                           }
@@ -1087,7 +1136,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                         </button>
                         <button
                           type="button"
-                          disabled={isPinDisabledForUser || isCooldownActive || isPermanentlyLocked}
+                          disabled={showPinDisabledOnUi || showCooldownOnUi || showPermanentLockOnUi}
                           onClick={() => setPinInput((prev) => prev.slice(0, -1))}
                           aria-label="Backspace PIN digit"
                           className="py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 cursor-pointer disabled:opacity-40"
@@ -1101,13 +1150,13 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                   <button
                     type="submit"
                     data-testid="login-submit-btn"
-                    disabled={isCooldownActive || isPermanentlyLocked}
+                    disabled={showCooldownOnUi || showPermanentLockOnUi}
                     className="w-full py-2.5 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-400 dark:disabled:bg-slate-800 disabled:cursor-not-allowed text-white font-semibold text-sm transition-colors flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <Lock className="w-4 h-4" />
-                    {isPermanentlyLocked
+                    {showPermanentLockOnUi
                       ? 'Account Permanently Locked by Security Policy'
-                      : isCooldownActive
+                      : showCooldownOnUi
                       ? `Locked — Wait ${formatCooldownTimerMMSS(cooldownRemainingMs)}`
                       : loginMethod === 'pin'
                       ? 'Unlock App with Mobile PIN'

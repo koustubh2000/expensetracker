@@ -22,7 +22,10 @@ import {
   downloadLocalFile,
   generateTransactionsCSV,
 } from '../utils/localVaultStorage';
-import { evaluatePasswordSecurity } from '../utils/financeRules';
+import {
+  evaluatePasswordSecurity,
+  verifySecretAgainstStoredHash,
+} from '../utils/financeRules';
 import { PasswordStrengthChecklist } from './PasswordStrengthChecklist';
 import {
   DropdownListEditButton,
@@ -79,6 +82,8 @@ export const LocalVaultAndSettingsView: React.FC<LocalVaultAndSettingsViewProps>
 
   // Own profile & thumbnail state (never pre-fill stored password in plain text)
   const [displayName, setDisplayName] = useState(currentUser.displayName);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -147,8 +152,13 @@ export const LocalVaultAndSettingsView: React.FC<LocalVaultAndSettingsViewProps>
   const handleSaveOwnProfile = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
+    setShowCurrentPassword(false);
     setShowNewPassword(false);
     setShowConfirmNewPassword(false);
+
+    const requiresCurrentPasswordVerification =
+      !currentUser.mustChangePassword &&
+      Boolean(currentUser.passwordHash && currentUser.passwordHash !== 'google-oauth');
 
     if (readOnlyMode) {
       // When account is On Hold, ONLY password changes are permitted!
@@ -156,6 +166,18 @@ export const LocalVaultAndSettingsView: React.FC<LocalVaultAndSettingsViewProps>
         setErrorMessage('Your account is On Hold. Only password updates are permitted.');
         onTriggerFeedback?.('Please Enter a New Password', 'error', 'toast');
         return;
+      }
+      if (requiresCurrentPasswordVerification) {
+        if (!currentPassword.trim()) {
+          setErrorMessage('Please enter your Current Password to verify your identity.');
+          onTriggerFeedback?.('Please Enter Current Password', 'error', 'toast');
+          return;
+        }
+        if (!verifySecretAgainstStoredHash(currentPassword, currentUser.passwordHash)) {
+          setErrorMessage('Incorrect Current Password. Password change cancelled.');
+          onTriggerFeedback?.('Incorrect Current Password', 'error', 'toast');
+          return;
+        }
       }
       const pwSec = evaluatePasswordSecurity(newPassword.trim());
       if (!pwSec.isAlphanumericValid) {
@@ -176,6 +198,7 @@ export const LocalVaultAndSettingsView: React.FC<LocalVaultAndSettingsViewProps>
         currentUser.currency,
         currentUser.avatarThumbnailDataUrl
       );
+      setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
       setStatusMessage('Password changed successfully.');
@@ -193,6 +216,18 @@ export const LocalVaultAndSettingsView: React.FC<LocalVaultAndSettingsViewProps>
 
     const isPasswordBeingChanged = Boolean(newPassword.trim() || confirmNewPassword.trim());
     if (isPasswordBeingChanged) {
+      if (requiresCurrentPasswordVerification) {
+        if (!currentPassword.trim()) {
+          setErrorMessage('Please enter your Current Password before setting a new password.');
+          onTriggerFeedback?.('Please Enter Current Password', 'error', 'toast');
+          return;
+        }
+        if (!verifySecretAgainstStoredHash(currentPassword, currentUser.passwordHash)) {
+          setErrorMessage('Incorrect Current Password. Password change cancelled.');
+          onTriggerFeedback?.('Incorrect Current Password', 'error', 'toast');
+          return;
+        }
+      }
       const pwSec = evaluatePasswordSecurity(newPassword.trim());
       if (!pwSec.isAlphanumericValid) {
         setErrorMessage(
@@ -221,6 +256,7 @@ export const LocalVaultAndSettingsView: React.FC<LocalVaultAndSettingsViewProps>
       finalCurr,
       avatarThumb
     );
+    setCurrentPassword('');
     setNewPassword('');
     setConfirmNewPassword('');
     setStatusMessage('Your personal account profile, password, and currency have been saved.');
@@ -450,6 +486,45 @@ export const LocalVaultAndSettingsView: React.FC<LocalVaultAndSettingsViewProps>
             </div>
 
             {/* Password inputs remain ENABLED even in readOnlyMode! */}
+            {!currentUser.mustChangePassword &&
+              currentUser.passwordHash &&
+              currentUser.passwordHash !== 'google-oauth' && (
+                <div>
+                  <label
+                    htmlFor="settings-current-password"
+                    className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    Current Password (Required only when changing password)
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="settings-current-password"
+                      data-testid="settings-current-password-input"
+                      type={showCurrentPassword ? 'text' : 'password'}
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      placeholder="Enter your current password to change password"
+                      autoComplete="current-password"
+                      className="w-full pl-3 pr-9 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPassword((prev) => !prev)}
+                      aria-label={
+                        showCurrentPassword ? 'Hide current password' : 'Show current password'
+                      }
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                    >
+                      {showCurrentPassword ? (
+                        <EyeOff className="w-3.5 h-3.5" />
+                      ) : (
+                        <Eye className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label

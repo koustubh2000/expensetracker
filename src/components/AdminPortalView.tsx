@@ -114,6 +114,8 @@ interface AdminPortalViewProps {
   ) => { ok: boolean; error?: string } | void;
   onResetEntirePortal: (adminPassword: string) => { ok: boolean; error?: string };
   onSyncLiveUsersFromFirebase?: (users: UserAccount[]) => void;
+  postLoginSecurityWarning?: string | null;
+  onDismissPostLoginSecurityWarning?: () => void;
   onTriggerFeedback: (
     message: string,
     type?: 'success' | 'error',
@@ -145,6 +147,8 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
   onAdminPermanentlyDeleteUser,
   onResetEntirePortal,
   onSyncLiveUsersFromFirebase,
+  postLoginSecurityWarning,
+  onDismissPostLoginSecurityWarning,
   onTriggerFeedback,
   onLogout,
 }) => {
@@ -181,11 +185,13 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
   const [showAdminDeleteUserPass, setShowAdminDeleteUserPass] = useState<boolean>(false);
   const [adminDeleteUserError, setAdminDeleteUserError] = useState<string>('');
 
-  // Admin own password change state (with Free Lifetime Firebase Email OTP + Confirm Password)
+  // Admin own password change state (with Current Admin Password OR Free Lifetime Firebase Email OTP + Confirm Password)
   const [adminDisplayName, setAdminDisplayName] = useState(adminUser.displayName);
   const [adminEmailInput, setAdminEmailInput] = useState(
     adminUser.email || DEFAULT_PRIMARY_ADMIN_EMAIL
   );
+  const [adminCurrentPassword, setAdminCurrentPassword] = useState('');
+  const [showAdminCurrentPass, setShowAdminCurrentPass] = useState(false);
   const [adminNewPassword, setAdminNewPassword] = useState('');
   const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
   const [showAdminNewPass, setShowAdminNewPass] = useState(false);
@@ -655,6 +661,7 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
   const handleSaveAdminCredentials = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorBanner('');
+    setShowAdminCurrentPass(false);
     setShowAdminNewPass(false);
     setShowAdminConfirmPass(false);
 
@@ -677,17 +684,34 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
       return;
     }
 
-    // Require Admin Email OTP verification before changing Admin Password
-    if (!adminOtpHashState || Date.now() > adminOtpExpiresAtMs) {
+    // Verify Admin identity via Current Admin Password OR 6-Digit Admin Email OTP
+    const hasCurrentPassInput = Boolean(adminCurrentPassword.trim());
+    const hasOtpInput = Boolean(adminOtpEntered.trim());
+
+    if (hasCurrentPassInput) {
+      if (!verifySecretAgainstStoredHash(adminCurrentPassword, adminUser.passwordHash)) {
+        setErrorBanner('Incorrect Current Admin Password. Password change cancelled.');
+        onTriggerFeedback('Incorrect Current Admin Password', 'error', 'toast');
+        return;
+      }
+    } else if (hasOtpInput || adminOtpHashState) {
+      if (!adminOtpHashState || Date.now() > adminOtpExpiresAtMs) {
+        setErrorBanner(
+          'Admin Email OTP has expired or was not sent yet. Please enter your Current Admin Password or click "Send 6-Digit OTP to Admin Email".'
+        );
+        onTriggerFeedback('Enter Current Password or Send Email OTP', 'error', 'toast');
+        return;
+      }
+      if (!verifySecretAgainstStoredHash(adminOtpEntered.trim(), adminOtpHashState)) {
+        setErrorBanner('Invalid 6-digit Admin Email OTP code. Please verify and try again.');
+        onTriggerFeedback('Invalid 6-Digit Email OTP', 'error', 'toast');
+        return;
+      }
+    } else {
       setErrorBanner(
-        'Admin password change requires Free Lifetime Firebase Email OTP verification. Please click "Send 6-Digit OTP to Admin Email" first.'
+        'Security verification required: Please enter your Current Admin Password OR verify a 6-Digit Admin Email OTP before changing your Admin password.'
       );
-      onTriggerFeedback('Send & Enter 6-Digit Email OTP First', 'error', 'toast');
-      return;
-    }
-    if (!verifySecretAgainstStoredHash(adminOtpEntered.trim(), adminOtpHashState)) {
-      setErrorBanner('Invalid 6-digit Admin Email OTP code. Please verify and try again.');
-      onTriggerFeedback('Invalid 6-Digit Email OTP', 'error', 'toast');
+      onTriggerFeedback('Enter Current Admin Password or Email OTP', 'error', 'toast');
       return;
     }
 
@@ -696,15 +720,16 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
       adminNewPassword.trim(),
       adminEmailInput.trim() || DEFAULT_PRIMARY_ADMIN_EMAIL
     );
+    setAdminCurrentPassword('');
     setAdminNewPassword('');
     setAdminConfirmPassword('');
     setAdminOtpEntered('');
     setAdminOtpHashState(null);
     setAdminDispatchedOtpPlain(null);
     setStatusBanner(
-      'Admin display name, email, and zero-knowledge SHA-256 hashed password updated via Email OTP!'
+      'Admin display name, email, and zero-knowledge SHA-256 hashed password updated and synced to Firebase!'
     );
-    onTriggerFeedback('Admin Password Updated via Email OTP', 'success', 'fullscreen');
+    onTriggerFeedback('Admin Password Updated & Synced to Database', 'success', 'fullscreen');
   };
 
   const handleCreateUserSubmit = (e: React.FormEvent) => {
@@ -1011,6 +1036,34 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
       </header>
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
+        {/* Session Security Warning if Prior Failed Attempts or Temporary Lock Occurred Before This Login */}
+        {postLoginSecurityWarning && (
+          <div
+            role="alert"
+            data-testid="post-login-security-warning-banner"
+            className="p-4 rounded-2xl bg-amber-500/15 border-2 border-amber-500 text-amber-950 dark:text-amber-100 shadow-lg flex flex-wrap items-center justify-between gap-3 text-xs"
+          >
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <div className="font-extrabold text-sm text-amber-900 dark:text-amber-200">
+                  Prior Failed Login Attempts Detected — Attempts Reset for Next Sign-In
+                </div>
+                <p className="leading-relaxed font-semibold">{postLoginSecurityWarning}</p>
+              </div>
+            </div>
+            {onDismissPostLoginSecurityWarning && (
+              <button
+                type="button"
+                data-testid="dismiss-post-login-security-warning-btn"
+                onClick={onDismissPostLoginSecurityWarning}
+                className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-xs cursor-pointer shrink-0"
+              >
+                Acknowledge &amp; Dismiss
+              </button>
+            )}
+          </div>
+        )}
         {/* Concurrent Login Security Notification for Admin */}
         {(adminUser.supportMessages || []).some((m) => m.messageType === 'security_login_alert') && (
           <div
@@ -3114,6 +3167,41 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                     placeholder={DEFAULT_PRIMARY_ADMIN_EMAIL}
                     className="w-full px-3.5 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
                   />
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="admin-current-password"
+                  className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
+                >
+                  Current Admin Password (Or Verify via Email OTP Below)
+                </label>
+                <div className="relative">
+                  <input
+                    id="admin-current-password"
+                    data-testid="admin-current-password-input"
+                    type={showAdminCurrentPass ? 'text' : 'password'}
+                    value={adminCurrentPassword}
+                    onChange={(e) => setAdminCurrentPassword(e.target.value)}
+                    placeholder="Enter current admin password to verify"
+                    autoComplete="current-password"
+                    className="w-full pl-3.5 pr-10 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminCurrentPass((p) => !p)}
+                    aria-label={
+                      showAdminCurrentPass ? 'Hide current admin password' : 'Show current admin password'
+                    }
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    {showAdminCurrentPass ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
                 </div>
               </div>
 
