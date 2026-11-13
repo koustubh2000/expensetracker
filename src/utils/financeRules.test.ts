@@ -1630,3 +1630,28 @@ test('getCanonicalSeedUsers and getCanonicalSeedVault restore admin, koustubh, T
   assert.equal(loadedKVault.transactions.length, 18);
   assert.equal(loadedKVault.dreamVaults.length, 2);
 });
+
+import { FIREBASE_CONSOLE_LINKS, fetchLiveFirebaseAdminOverview } from '../lib/firebase';
+
+test('FIREBASE_CONSOLE_LINKS and fetchLiveFirebaseAdminOverview return valid console URLs, live users, vaults, and stored images', async () => {
+  assert.ok(FIREBASE_CONSOLE_LINKS.appUsersCollectionUrl.includes('~2FappUsers'));
+  assert.ok(FIREBASE_CONSOLE_LINKS.userVaultsCollectionUrl.includes('~2FuserVaults'));
+  assert.ok(FIREBASE_CONSOLE_LINKS.globalConfigDocUrl.includes('~2FglobalConfig~2Fmain'));
+  assert.ok(FIREBASE_CONSOLE_LINKS.firebaseStorageBucketUrl.includes('/storage'));
+
+  const overview = await fetchLiveFirebaseAdminOverview({
+    currentUsers: getCanonicalSeedUsers(),
+    heroImage: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    pdfHeaderConfig: DEFAULT_PDF_HEADER_CONFIG,
+  });
+
+  assert.equal(overview.users.length, 3);
+  assert.equal(overview.vaultSummaries.length, 3);
+  assert.ok(overview.storedImages.length >= 1);
+  const kSummary = overview.vaultSummaries.find((v) => v.username === 'koustubh');
+  assert.ok(kSummary);
+  assert.equal(kSummary.accountsCount, 3);
+  assert.equal(kSummary.transactionsCount, 18);
+  assert.equal(kSummary.dreamVaultsCount, 2);
+});
+

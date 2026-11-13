@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Copy,
   Database,
+  ExternalLink,
   Eye,
   EyeOff,
   FileText,
@@ -63,6 +64,10 @@ import {
   verifySecretAgainstStoredHash,
 } from '../utils/financeRules';
 import {
+  fetchLiveFirebaseAdminOverview,
+  FIREBASE_CONSOLE_LINKS,
+  FirebaseStoredImageItem,
+  LiveFirebaseAdminOverview,
   sendAdminEmailOtpViaFirebaseAndRelay,
   verifyAdminEmailOwnershipWithFirebaseGoogle,
 } from '../lib/firebase';
@@ -108,6 +113,7 @@ interface AdminPortalViewProps {
     adminPassword?: string
   ) => { ok: boolean; error?: string } | void;
   onResetEntirePortal: (adminPassword: string) => { ok: boolean; error?: string };
+  onSyncLiveUsersFromFirebase?: (users: UserAccount[]) => void;
   onTriggerFeedback: (
     message: string,
     type?: 'success' | 'error',
@@ -138,12 +144,24 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
   onAdminCloseSupportIssue,
   onAdminPermanentlyDeleteUser,
   onResetEntirePortal,
+  onSyncLiveUsersFromFirebase,
   onTriggerFeedback,
   onLogout,
 }) => {
   const [statusBanner, setStatusBanner] = useState<string>('');
   const [errorBanner, setErrorBanner] = useState<string>('');
   const [copiedUserId, setCopiedUserId] = useState<string>('');
+
+  // Live Firebase Inspector & Refresh State
+  const [firebaseRefreshing, setFirebaseRefreshing] = useState<boolean>(false);
+  const [liveFirebaseOverview, setLiveFirebaseOverview] =
+    useState<LiveFirebaseAdminOverview | null>(null);
+  const [activeFirebaseInspectorTab, setActiveFirebaseInspectorTab] = useState<
+    'images' | 'users' | 'data' | null
+  >(null);
+  const [previewStoredImage, setPreviewStoredImage] = useState<FirebaseStoredImageItem | null>(
+    null
+  );
 
   // Support Chat & Hold Reason Modal State
   const [activeSupportUserId, setActiveSupportUserId] = useState<string | null>(null);
@@ -313,6 +331,47 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
     draftPdfHeader
   );
   const firebaseStorageReport = calculateFirebaseFreeTierStorageStats(storageFootprintStrings);
+
+  const handleRefreshLiveFirebaseData = async (showFeedback = true) => {
+    setFirebaseRefreshing(true);
+    try {
+      const overview = await fetchLiveFirebaseAdminOverview({
+        currentUsers: users,
+        heroImage: landingHeroImage,
+        pdfHeaderConfig: draftPdfHeader,
+        forceFirestoreCheck: showFeedback,
+      });
+      setLiveFirebaseOverview(overview);
+      if (onSyncLiveUsersFromFirebase && overview.users.length > 0) {
+        onSyncLiveUsersFromFirebase(overview.users);
+      }
+      if (showFeedback) {
+        setStatusBanner(
+          `Refreshed live Firebase data at ${new Date(
+            overview.refreshedAtIso
+          ).toLocaleTimeString()}: ${overview.users.length} Users in /appUsers, ${
+            overview.vaultSummaries.length
+          } Vaults in /userVaults, and ${overview.storedImages.length} Images stored in Firebase.`
+        );
+        onTriggerFeedback(
+          `Live Firebase Data Refreshed (${overview.users.length} Users, ${overview.storedImages.length} Images)`,
+          'success',
+          'toast'
+        );
+      }
+    } catch {
+      if (showFeedback) {
+        setErrorBanner('Could not refresh live Firebase data. Showing latest cached snapshot.');
+      }
+    } finally {
+      setFirebaseRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    void handleRefreshLiveFirebaseData(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users.length, landingHeroImage, draftPdfHeader.imageUrl]);
 
   const processHeroImageFiles = async (files: File[]) => {
     if (!files || files.length === 0) return;
@@ -1078,7 +1137,7 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
           </div>
         )}
 
-        {/* FIREBASE FREE-TIER LIFETIME STORAGE & QUOTA STATUS MONITOR */}
+        {/* FIREBASE FREE-TIER LIFETIME STORAGE & QUOTA STATUS MONITOR + LIVE DATA REFRESH & LINKS */}
         <section
           data-testid="firebase-storage-quota-monitor"
           className="p-5 rounded-2xl border-2 border-emerald-500/30 bg-white dark:bg-slate-900 shadow-xs space-y-4"
@@ -1091,28 +1150,52 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-base font-extrabold text-slate-900 dark:text-white">
-                    Firebase Free-Tier Lifetime Storage &amp; Quota Status
+                    Firebase Free-Tier Lifetime Storage &amp; Live Data Inspector
                   </h2>
                   <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-extrabold text-[11px] uppercase">
                     Spark Plan · $0 Free Forever
                   </span>
+                  {liveFirebaseOverview && (
+                    <span className="px-2.5 py-0.5 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 font-bold text-[11px] flex items-center gap-1">
+                      <Activity className="w-3 h-3" />
+                      Last Live Check:{' '}
+                      {new Date(liveFirebaseOverview.refreshedAtIso).toLocaleTimeString()}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   Real-time storage footprint across all users, vaults, receipt proofs, and banner
-                  photos. Deleting any user, chat, or image updates free space immediately.
+                  photos. Click <strong>Refresh Live Data</strong> or use the links below to inspect
+                  images, users, and vault data stored in Firebase.
                 </p>
               </div>
             </div>
 
-            <div className="text-right">
-              <div className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                Free Space Remaining
-              </div>
-              <div
-                data-testid="firebase-free-space-remaining"
-                className="text-lg font-extrabold font-mono text-emerald-600 dark:text-emerald-400"
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void handleRefreshLiveFirebaseData(true)}
+                disabled={firebaseRefreshing}
+                data-testid="admin-refresh-firebase-live-btn"
+                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-xs font-extrabold flex items-center gap-2 cursor-pointer shadow-xs transition-all"
               >
-                {firebaseStorageReport.formattedFreeRemaining} ({firebaseStorageReport.freePercentage}% Free)
+                <RefreshCw
+                  className={`w-4 h-4 ${firebaseRefreshing ? 'animate-spin' : ''}`}
+                />
+                {firebaseRefreshing ? 'Checking Live Firebase...' : 'Refresh Live Data'}
+              </button>
+
+              <div className="text-right">
+                <div className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                  Free Space Remaining
+                </div>
+                <div
+                  data-testid="firebase-free-space-remaining"
+                  className="text-lg font-extrabold font-mono text-emerald-600 dark:text-emerald-400"
+                >
+                  {firebaseStorageReport.formattedFreeRemaining} (
+                  {firebaseStorageReport.freePercentage}% Free)
+                </div>
               </div>
             </div>
           </div>
@@ -1123,7 +1206,10 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
               <span className="text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <HardDrive className="w-3.5 h-3.5 text-emerald-500" />
                 Current Used Storage:{' '}
-                <strong data-testid="firebase-used-storage" className="font-mono text-slate-900 dark:text-white">
+                <strong
+                  data-testid="firebase-used-storage"
+                  className="font-mono text-slate-900 dark:text-white"
+                >
                   {firebaseStorageReport.formattedUsed}
                 </strong>{' '}
                 ({firebaseStorageReport.totalUsedBytes.toLocaleString()} bytes)
@@ -1142,50 +1228,486 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
             </div>
           </div>
 
-          {/* 3-Column Live Breakdown */}
+          {/* 3-Column Clickable Live Breakdown Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() =>
+                setActiveFirebaseInspectorTab((prev) => (prev === 'users' ? null : 'users'))
+              }
+              data-testid="firebase-check-users-card-btn"
+              className={`p-3 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
+                activeFirebaseInspectorTab === 'users'
+                  ? 'bg-emerald-500/15 border-emerald-500 ring-1 ring-emerald-500/40'
+                  : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-emerald-500/50'
+              }`}
+            >
               <div>
-                <div className="font-bold text-slate-800 dark:text-slate-200">
+                <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-emerald-500" />
                   1. Users &amp; Support Chats ({users.length})
                 </div>
-                <div className="text-[11px] text-slate-500">
-                  Auto-purges closed chats &amp; alerts after 24h
+                <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5">
+                  Click to check users in Firebase (/appUsers)
                 </div>
               </div>
               <span className="font-mono font-extrabold text-emerald-600 dark:text-emerald-400">
                 {formatStorageBytes(firebaseStorageReport.usersAndChatsBytes)}
               </span>
-            </div>
+            </button>
 
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() =>
+                setActiveFirebaseInspectorTab((prev) => (prev === 'data' ? null : 'data'))
+              }
+              data-testid="firebase-check-data-card-btn"
+              className={`p-3 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
+                activeFirebaseInspectorTab === 'data'
+                  ? 'bg-sky-500/15 border-sky-500 ring-1 ring-sky-500/40'
+                  : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-sky-500/50'
+              }`}
+            >
               <div>
-                <div className="font-bold text-slate-800 dark:text-slate-200">
-                  2. Vaults &amp; Receipt Proofs
+                <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <Database className="w-3.5 h-3.5 text-sky-500" />
+                  2. Vaults &amp; Receipt Proofs (
+                  {liveFirebaseOverview?.vaultSummaries.length ?? users.length})
                 </div>
-                <div className="text-[11px] text-slate-500">
-                  Compressed HD proofs &amp; ledger records
+                <div className="text-[11px] text-sky-600 dark:text-sky-400 font-semibold mt-0.5">
+                  Click to check data in Firebase (/userVaults)
                 </div>
               </div>
               <span className="font-mono font-extrabold text-sky-600 dark:text-sky-400">
                 {formatStorageBytes(firebaseStorageReport.vaultsAndProofsBytes)}
               </span>
-            </div>
+            </button>
 
-            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() =>
+                setActiveFirebaseInspectorTab((prev) => (prev === 'images' ? null : 'images'))
+              }
+              data-testid="firebase-check-images-card-btn"
+              className={`p-3 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
+                activeFirebaseInspectorTab === 'images'
+                  ? 'bg-violet-500/15 border-violet-500 ring-1 ring-violet-500/40'
+                  : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-violet-500/50'
+              }`}
+            >
               <div>
-                <div className="font-bold text-slate-800 dark:text-slate-200">
-                  3. Banner Photos ({heroImagesList.length}) &amp; PDF Logo
+                <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <Images className="w-3.5 h-3.5 text-violet-500" />
+                  3. Stored Images ({liveFirebaseOverview?.storedImages.length ?? heroImagesList.length})
                 </div>
-                <div className="text-[11px] text-slate-500">
-                  Public carousel &amp; PDF statement header
+                <div className="text-[11px] text-violet-600 dark:text-violet-400 font-semibold mt-0.5">
+                  Click to check images stored in Firebase
                 </div>
               </div>
               <span className="font-mono font-extrabold text-violet-600 dark:text-violet-400">
                 {formatStorageBytes(firebaseStorageReport.bannersAndPdfConfigBytes)}
               </span>
-            </div>
+            </button>
           </div>
+
+          {/* ATTACHED LINKS TO CHECK IMAGES, USERS, AND DATA IN FIREBASE (IN-APP + DIRECT FIREBASE CONSOLE) */}
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/90 border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                <ExternalLink className="w-3.5 h-3.5 text-emerald-500" />
+                Quick Links — Check Images, Users &amp; Data Stored in Firebase:
+              </div>
+              <span className="text-[11px] font-mono text-slate-500">
+                DB: {FIREBASE_CONSOLE_LINKS.databaseId}
+              </span>
+            </div>
+
+            {/* In-App Live Inspector Toggle Links + External Firebase Console Links */}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() =>
+                  setActiveFirebaseInspectorTab((prev) => (prev === 'images' ? null : 'images'))
+                }
+                data-testid="link-check-firebase-images"
+                className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 cursor-pointer border transition-all ${
+                  activeFirebaseInspectorTab === 'images'
+                    ? 'bg-violet-600 text-white border-violet-500'
+                    : 'bg-violet-500/10 hover:bg-violet-500/20 text-violet-700 dark:text-violet-300 border-violet-500/30'
+                }`}
+              >
+                <Images className="w-3.5 h-3.5" />
+                Check Images Stored in Firebase ({liveFirebaseOverview?.storedImages.length ?? 0})
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setActiveFirebaseInspectorTab((prev) => (prev === 'users' ? null : 'users'))
+                }
+                data-testid="link-check-firebase-users"
+                className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 cursor-pointer border transition-all ${
+                  activeFirebaseInspectorTab === 'users'
+                    ? 'bg-emerald-600 text-white border-emerald-500'
+                    : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                Check Users in Firebase ({liveFirebaseOverview?.users.length ?? users.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setActiveFirebaseInspectorTab((prev) => (prev === 'data' ? null : 'data'))
+                }
+                data-testid="link-check-firebase-data"
+                className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 cursor-pointer border transition-all ${
+                  activeFirebaseInspectorTab === 'data'
+                    ? 'bg-sky-600 text-white border-sky-500'
+                    : 'bg-sky-500/10 hover:bg-sky-500/20 text-sky-700 dark:text-sky-300 border-sky-500/30'
+                }`}
+              >
+                <Database className="w-3.5 h-3.5" />
+                Check Vault Data in Firebase (
+                {liveFirebaseOverview?.vaultSummaries.length ?? users.length})
+              </button>
+
+              <a
+                href={FIREBASE_CONSOLE_LINKS.globalConfigDocUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="external-link-firebase-images"
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 font-semibold flex items-center gap-1.5"
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-violet-500" />
+                Firebase Console: Images &amp; Config (/globalConfig)
+              </a>
+
+              <a
+                href={FIREBASE_CONSOLE_LINKS.appUsersCollectionUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="external-link-firebase-users"
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 font-semibold flex items-center gap-1.5"
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-emerald-500" />
+                Firebase Console: Users (/appUsers)
+              </a>
+
+              <a
+                href={FIREBASE_CONSOLE_LINKS.userVaultsCollectionUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="external-link-firebase-data"
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 font-semibold flex items-center gap-1.5"
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-sky-500" />
+                Firebase Console: Vault Data (/userVaults)
+              </a>
+
+              <a
+                href={FIREBASE_CONSOLE_LINKS.firebaseStorageBucketUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="external-link-firebase-storage-bucket"
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 font-semibold flex items-center gap-1.5"
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
+                Firebase Storage Bucket
+              </a>
+            </div>
+
+            {/* EXPANDABLE LIVE FIREBASE INSPECTOR PANEL */}
+            {activeFirebaseInspectorTab && (
+              <div
+                data-testid={`firebase-live-inspector-${activeFirebaseInspectorTab}`}
+                className="mt-3 p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
+                  <div className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                    {activeFirebaseInspectorTab === 'images' && (
+                      <>
+                        <Images className="w-4 h-4 text-violet-500" />
+                        Live Images Stored in Firebase (
+                        {liveFirebaseOverview?.storedImages.length ?? 0})
+                      </>
+                    )}
+                    {activeFirebaseInspectorTab === 'users' && (
+                      <>
+                        <Users className="w-4 h-4 text-emerald-500" />
+                        Live Users Stored in Firebase `/appUsers` (
+                        {(liveFirebaseOverview?.users || users).length})
+                      </>
+                    )}
+                    {activeFirebaseInspectorTab === 'data' && (
+                      <>
+                        <Database className="w-4 h-4 text-sky-500" />
+                        Live User Vault Documents in Firebase `/userVaults` (
+                        {liveFirebaseOverview?.vaultSummaries.length ?? users.length})
+                      </>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleRefreshLiveFirebaseData(true)}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <RefreshCw
+                        className={`w-3 h-3 ${firebaseRefreshing ? 'animate-spin' : ''}`}
+                      />
+                      Refresh Now
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveFirebaseInspectorTab(null)}
+                      aria-label="Close Firebase Inspector"
+                      className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* TAB 1: IMAGES STORED IN FIREBASE */}
+                {activeFirebaseInspectorTab === 'images' && (
+                  <div>
+                    {(liveFirebaseOverview?.storedImages || []).length === 0 ? (
+                      <div className="py-6 text-center text-xs text-slate-500">
+                        No custom images currently stored in Firebase (using embedded default SVG
+                        vectors). Upload a Front Page Hero Banner, PDF Header Logo, or Receipt Proof
+                        to see it listed here.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {(liveFirebaseOverview?.storedImages || []).map((img) => (
+                          <div
+                            key={img.id}
+                            className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-start gap-3"
+                          >
+                            <img
+                              src={img.dataUrl}
+                              alt={img.title}
+                              onClick={() => setPreviewStoredImage(img)}
+                              className="w-14 h-14 rounded-lg object-cover border border-slate-300 dark:border-slate-700 shrink-0 cursor-pointer bg-white"
+                            />
+                            <div className="min-w-0 flex-1 space-y-1 text-xs">
+                              <div className="font-bold text-slate-900 dark:text-white truncate">
+                                {img.title}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                                <span className="px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-700 dark:text-violet-300 font-bold">
+                                  {img.category}
+                                </span>
+                                <span className="font-mono text-slate-500">
+                                  {formatStorageBytes(img.sizeBytes)}
+                                </span>
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-400 truncate">
+                                Path: {img.firestorePath} · {img.ownerLabel}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewStoredImage(img)}
+                                  className="text-[11px] font-bold text-violet-600 dark:text-violet-400 hover:underline flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  Preview Image
+                                </button>
+                                <a
+                                  href={img.consoleUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  Firebase Doc
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* TAB 2: USERS IN FIREBASE (/appUsers) */}
+                {activeFirebaseInspectorTab === 'users' && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase text-slate-500">
+                          <th className="py-2 px-3">Firestore Doc ID</th>
+                          <th className="py-2 px-3">Username &amp; Name</th>
+                          <th className="py-2 px-3">Role &amp; Status</th>
+                          <th className="py-2 px-3">Password Security</th>
+                          <th className="py-2 px-3 text-right">Firebase Console Link</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                        {(liveFirebaseOverview?.users || users).map((u) => (
+                          <tr key={u.id}>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                              /appUsers/{u.id}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className="font-bold text-slate-900 dark:text-white">
+                                @{u.username}
+                              </span>{' '}
+                              <span className="text-slate-500">({u.displayName})</span>
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                                  u.role === 'admin'
+                                    ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                                    : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                }`}
+                              >
+                                {u.role}
+                              </span>{' '}
+                              <span className="text-[11px] text-slate-500 uppercase">
+                                · {u.accountStatus || 'active'}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-emerald-600 dark:text-emerald-400">
+                              {isIrreversibleHash(u.passwordHash)
+                                ? 'SHA-256 Zero-Knowledge Hash'
+                                : 'Protected'}
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              <a
+                                href={FIREBASE_CONSOLE_LINKS.getUserDocConsoleUrl(u.id)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-bold text-[11px]"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                Open in Firebase
+                              </a>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* TAB 3: VAULT DATA IN FIREBASE (/userVaults) */}
+                {activeFirebaseInspectorTab === 'data' && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase text-slate-500">
+                          <th className="py-2 px-3">Firestore Vault Path</th>
+                          <th className="py-2 px-3">Owner</th>
+                          <th className="py-2 px-3">Live Vault Contents</th>
+                          <th className="py-2 px-3">Doc Size</th>
+                          <th className="py-2 px-3">Last Updated</th>
+                          <th className="py-2 px-3 text-right">Firebase Console Link</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                        {(liveFirebaseOverview?.vaultSummaries || []).map((v) => (
+                          <tr key={v.userId}>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-sky-600 dark:text-sky-400">
+                              {v.firestorePath}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className="font-bold text-slate-900 dark:text-white">
+                                @{v.username}
+                              </span>{' '}
+                              <span className="text-slate-500">({v.displayName})</span>
+                            </td>
+                            <td className="py-2.5 px-3 text-[11px] text-slate-700 dark:text-slate-300">
+                              <strong>{v.accountsCount}</strong> Accounts ·{' '}
+                              <strong>{v.transactionsCount}</strong> Records ·{' '}
+                              <strong>{v.dreamVaultsCount}</strong> Investments/Dreams ·{' '}
+                              <strong>{v.peopleCount}</strong> People ·{' '}
+                              <strong>{v.storedImagesCount}</strong> Images
+                            </td>
+                            <td className="py-2.5 px-3 font-mono font-bold text-slate-800 dark:text-slate-200">
+                              {formatStorageBytes(v.sizeBytes)}
+                            </td>
+                            <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">
+                              {v.updatedAt ? v.updatedAt.slice(0, 19).replace('T', ' ') : 'Synced'}
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              <a
+                                href={v.consoleUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-sky-500/10 hover:bg-sky-500/20 text-sky-700 dark:text-sky-300 font-bold text-[11px]"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                Open Vault Doc
+                              </a>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* FULL-SCREEN IMAGE PREVIEW MODAL FOR STORED FIREBASE IMAGES */}
+          {previewStoredImage && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label={`Preview ${previewStoredImage.title}`}
+              className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4"
+              onClick={() => setPreviewStoredImage(null)}
+            >
+              <div
+                className="max-w-2xl w-full rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 space-y-3 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                      {previewStoredImage.title}
+                    </h3>
+                    <p className="text-[11px] font-mono text-slate-500">
+                      {previewStoredImage.firestorePath} ·{' '}
+                      {formatStorageBytes(previewStoredImage.sizeBytes)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={previewStoredImage.consoleUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      Open in Firebase Console
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewStoredImage(null)}
+                      className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="max-h-[70vh] overflow-auto rounded-xl bg-slate-100 dark:bg-slate-950 p-3 flex items-center justify-center">
+                  <img
+                    src={previewStoredImage.dataUrl}
+                    alt={previewStoredImage.title}
+                    className="max-w-full max-h-[62vh] object-contain rounded-lg"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* 1. USER & ADMIN MANAGEMENT TABLE (Hold, Activate, Disable, Delete, Support Chat & Reset Portal) */}

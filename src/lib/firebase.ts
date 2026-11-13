@@ -47,6 +47,7 @@ import {
   saveProofImageLocally,
   saveUsersToLocal,
   saveUserVault,
+  loadUserVault,
 } from '../utils/localVaultStorage';
 import {
   DEFAULT_PRIMARY_ADMIN_EMAIL,
@@ -99,6 +100,7 @@ function markQuotaExhaustedIfMatched(err: unknown): void {
 }
 
 function canCallFirestoreNow(): boolean {
+  if (typeof window === 'undefined') return false;
   return Date.now() >= firestoreQuotaExhaustedUntilMs;
 }
 
@@ -114,7 +116,7 @@ interface ServerMirrorState {
 }
 
 async function fetchFromServerMirror(): Promise<ServerMirrorState | null> {
-  if (typeof fetch === 'undefined') return null;
+  if (typeof window === 'undefined' || typeof fetch === 'undefined') return null;
   try {
     const res = await fetch('/api/vault-mirror', {
       method: 'GET',
@@ -128,7 +130,7 @@ async function fetchFromServerMirror(): Promise<ServerMirrorState | null> {
 }
 
 async function pushToServerMirror(payload: Record<string, unknown>): Promise<void> {
-  if (typeof fetch === 'undefined') return;
+  if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
   try {
     await fetch('/api/vault-mirror', {
       method: 'POST',
@@ -1535,3 +1537,246 @@ export async function updateCloudDreamVaultAmount(
     handleFirestoreError(error, OperationType.UPDATE, `dreamVaults/${docId}`);
   }
 }
+
+// ============================================================================
+// ADMIN LIVE FIREBASE INSPECTOR & DIRECT CONSOLE LINKS
+// ============================================================================
+
+const FB_PROJECT_ID = firebaseConfig.projectId || 'authentic-mantis-4xq1s';
+const FB_DB_ID =
+  firebaseConfig.firestoreDatabaseId ||
+  'ai-studio-pocketledgervaul-69a2f2f1-759f-4f8a-a83e-963bbfb7ff75';
+const FB_CONSOLE_BASE = `https://console.firebase.google.com/project/${FB_PROJECT_ID}/firestore/databases/${FB_DB_ID}`;
+
+export const FIREBASE_CONSOLE_LINKS = {
+  projectId: FB_PROJECT_ID,
+  databaseId: FB_DB_ID,
+  storageBucket: firebaseConfig.storageBucket || `${FB_PROJECT_ID}.firebasestorage.app`,
+  firestoreRootUrl: `${FB_CONSOLE_BASE}/data`,
+  appUsersCollectionUrl: `${FB_CONSOLE_BASE}/data/~2FappUsers`,
+  userVaultsCollectionUrl: `${FB_CONSOLE_BASE}/data/~2FuserVaults`,
+  globalConfigDocUrl: `${FB_CONSOLE_BASE}/data/~2FglobalConfig~2Fmain`,
+  authUsersUrl: `https://console.firebase.google.com/project/${FB_PROJECT_ID}/authentication/users`,
+  storageAndUsageUrl: `${FB_CONSOLE_BASE}/usage`,
+  firebaseStorageBucketUrl: `https://console.firebase.google.com/project/${FB_PROJECT_ID}/storage`,
+  getUserDocConsoleUrl: (userId: string) =>
+    `${FB_CONSOLE_BASE}/data/~2FappUsers~2F${cleanId(userId)}`,
+  getVaultDocConsoleUrl: (userId: string) =>
+    `${FB_CONSOLE_BASE}/data/~2FuserVaults~2F${cleanId(userId)}`,
+};
+
+export interface FirebaseStoredImageItem {
+  id: string;
+  title: string;
+  category:
+    | 'Banner Photo'
+    | 'PDF Header Logo'
+    | 'User Avatar'
+    | 'Receipt Proof'
+    | 'Dream / Investment Image'
+    | 'Bank Logo';
+  ownerLabel: string;
+  firestorePath: string;
+  consoleUrl: string;
+  dataUrl: string;
+  sizeBytes: number;
+}
+
+export interface FirebaseVaultDocSummary {
+  userId: string;
+  username: string;
+  displayName: string;
+  role: 'admin' | 'user';
+  firestorePath: string;
+  consoleUrl: string;
+  updatedAt: string;
+  accountsCount: number;
+  transactionsCount: number;
+  dreamVaultsCount: number;
+  peopleCount: number;
+  expectedItemsCount: number;
+  loansCount: number;
+  storedImagesCount: number;
+  sizeBytes: number;
+}
+
+export interface LiveFirebaseAdminOverview {
+  refreshedAtIso: string;
+  connectionStatus: 'live_firestore' | 'cloud_mirror_active';
+  statusNote: string;
+  users: UserAccount[];
+  vaultSummaries: FirebaseVaultDocSummary[];
+  storedImages: FirebaseStoredImageItem[];
+  totalCloudBytes: number;
+}
+
+export async function fetchLiveFirebaseAdminOverview(params: {
+  currentUsers: UserAccount[];
+  heroImage: string | null;
+  pdfHeaderConfig: PdfHeaderImageConfig;
+  forceFirestoreCheck?: boolean;
+}): Promise<LiveFirebaseAdminOverview> {
+  if (params.forceFirestoreCheck) {
+    firestoreQuotaExhaustedUntilMs = 0;
+  }
+
+  // 1. Refresh users from Server Mirror + Firestore
+  const refreshedUsers =
+    (await fetchCloudUsersFromServer(params.currentUsers)) || params.currentUsers;
+
+  const storedImages: FirebaseStoredImageItem[] = [];
+  const vaultSummaries: FirebaseVaultDocSummary[] = [];
+
+  // 2. Inspect Global Config images (/globalConfig/main)
+  const heroList = parseHeroImagesPayload(params.heroImage);
+  heroList.forEach((imgDataUrl, idx) => {
+    if (imgDataUrl && imgDataUrl.length > 0) {
+      storedImages.push({
+        id: `global-hero-${idx + 1}`,
+        title: `Front Page Hero Banner #${idx + 1}`,
+        category: 'Banner Photo',
+        ownerLabel: 'Global Config',
+        firestorePath: '/globalConfig/main',
+        consoleUrl: FIREBASE_CONSOLE_LINKS.globalConfigDocUrl,
+        dataUrl: imgDataUrl,
+        sizeBytes: new Blob([imgDataUrl]).size,
+      });
+    }
+  });
+
+  const pdfImg =
+    params.pdfHeaderConfig?.imageUrl ||
+    (params.pdfHeaderConfig as any)?.dataUrl ||
+    loadProofImageLocally('global-pdf-header-logo');
+  if (pdfImg && typeof pdfImg === 'string' && pdfImg.length > 0) {
+    storedImages.push({
+      id: 'global-pdf-header-logo',
+      title: 'PDF Statement Header Logo',
+      category: 'PDF Header Logo',
+      ownerLabel: 'Global Config',
+      firestorePath: '/globalConfig/main',
+      consoleUrl: FIREBASE_CONSOLE_LINKS.globalConfigDocUrl,
+      dataUrl: pdfImg,
+      sizeBytes: new Blob([pdfImg]).size,
+    });
+  }
+
+  // 3. Inspect each user's /appUsers/{userId} and /userVaults/{userId}
+  for (const u of refreshedUsers) {
+    const safeUid = cleanId(u.id);
+    const userAvatar = u.avatarThumbnailDataUrl || loadProofImageLocally(`user-avatar-${u.id}`);
+    if (userAvatar && userAvatar.length > 0) {
+      storedImages.push({
+        id: `avatar-${safeUid}`,
+        title: `Profile Avatar — @${u.username}`,
+        category: 'User Avatar',
+        ownerLabel: `${u.displayName} (@${u.username})`,
+        firestorePath: `/appUsers/${safeUid}`,
+        consoleUrl: FIREBASE_CONSOLE_LINKS.getUserDocConsoleUrl(safeUid),
+        dataUrl: userAvatar,
+        sizeBytes: new Blob([userAvatar]).size,
+      });
+    }
+
+    const localFallbackVault = loadUserVault(u.id);
+    const liveVault =
+      (await fetchUserCloudVaultFromServer(u.id, localFallbackVault)) || localFallbackVault;
+
+    let vaultImagesCount = 0;
+    const vaultDocUrl = FIREBASE_CONSOLE_LINKS.getVaultDocConsoleUrl(safeUid);
+    const vaultPath = `/userVaults/${safeUid}`;
+
+    for (const tx of liveVault.transactions || []) {
+      const proofImg =
+        tx.proofImageDataUrl || (tx.proofId ? loadProofImageLocally(tx.proofId) : undefined);
+      if (proofImg && proofImg.length > 0) {
+        vaultImagesCount++;
+        storedImages.push({
+          id: `tx-proof-${safeUid}-${tx.id}`,
+          title: `Receipt Proof #${tx.id} — ${tx.title}`,
+          category: 'Receipt Proof',
+          ownerLabel: `@${u.username}`,
+          firestorePath: vaultPath,
+          consoleUrl: vaultDocUrl,
+          dataUrl: proofImg,
+          sizeBytes: new Blob([proofImg]).size,
+        });
+      }
+    }
+
+    for (const dv of liveVault.dreamVaults || []) {
+      const dvImg = dv.imageUrl || loadProofImageLocally(`dream-img-${dv.id}`);
+      if (dvImg && dvImg.length > 0) {
+        vaultImagesCount++;
+        storedImages.push({
+          id: `dream-img-${safeUid}-${dv.id}`,
+          title: `${dv.name} (${dv.storageType})`,
+          category: 'Dream / Investment Image',
+          ownerLabel: `@${u.username}`,
+          firestorePath: vaultPath,
+          consoleUrl: vaultDocUrl,
+          dataUrl: dvImg,
+          sizeBytes: new Blob([dvImg]).size,
+        });
+      }
+    }
+
+    for (const acc of liveVault.accounts || []) {
+      const accLogo = acc.bankLogoUrl || loadProofImageLocally(`acc-logo-${acc.id}`);
+      if (accLogo && accLogo.startsWith('data:image/') && !accLogo.startsWith('data:image/svg+xml')) {
+        vaultImagesCount++;
+        storedImages.push({
+          id: `acc-logo-${safeUid}-${acc.id}`,
+          title: `Bank Logo — ${acc.name}`,
+          category: 'Bank Logo',
+          ownerLabel: `@${u.username}`,
+          firestorePath: vaultPath,
+          consoleUrl: vaultDocUrl,
+          dataUrl: accLogo,
+          sizeBytes: new Blob([accLogo]).size,
+        });
+      }
+    }
+
+    const vaultJsonStr = JSON.stringify(liveVault);
+    vaultSummaries.push({
+      userId: u.id,
+      username: u.username,
+      displayName: u.displayName,
+      role: u.role,
+      firestorePath: vaultPath,
+      consoleUrl: vaultDocUrl,
+      updatedAt: liveVault.updatedAt || u.updatedAt || u.createdAt,
+      accountsCount: (liveVault.accounts || []).length,
+      transactionsCount: (liveVault.transactions || []).length,
+      dreamVaultsCount: (liveVault.dreamVaults || []).length,
+      peopleCount: (liveVault.people || []).length,
+      expectedItemsCount: (liveVault.expectedItems || []).length,
+      loansCount: (liveVault.loans || []).length,
+      storedImagesCount: vaultImagesCount,
+      sizeBytes: new Blob([vaultJsonStr]).size,
+    });
+  }
+
+  const connectionStatus = canCallFirestoreNow() ? 'live_firestore' : 'cloud_mirror_active';
+  const totalCloudBytes =
+    vaultSummaries.reduce((acc, v) => acc + v.sizeBytes, 0) +
+    new Blob([JSON.stringify(refreshedUsers)]).size +
+    storedImages
+      .filter((img) => img.firestorePath === '/globalConfig/main')
+      .reduce((acc, img) => acc + img.sizeBytes, 0);
+
+  return {
+    refreshedAtIso: new Date().toISOString(),
+    connectionStatus,
+    statusNote:
+      connectionStatus === 'live_firestore'
+        ? 'Connected directly to Firebase Cloud Firestore & Cloud Mirror'
+        : 'Synced via Cloud Mirror (Firestore daily free-tier read quota cooldown active)',
+    users: refreshedUsers,
+    vaultSummaries,
+    storedImages,
+    totalCloudBytes,
+  };
+}
+

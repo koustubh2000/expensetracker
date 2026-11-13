@@ -2751,6 +2751,7 @@ export default function App() {
           onAdminCloseSupportIssue={handleAdminCloseSupportIssue}
           onAdminPermanentlyDeleteUser={handleAdminPermanentlyDeleteUser}
           onResetEntirePortal={handleResetEntirePortal}
+          onSyncLiveUsersFromFirebase={(refreshedUsers) => setUsers(refreshedUsers)}
           onTriggerFeedback={triggerFeedback}
           onLogout={() => void handleLogout(false)}
         />
