@@ -1655,3 +1655,44 @@ test('FIREBASE_CONSOLE_LINKS and fetchLiveFirebaseAdminOverview return valid con
   assert.equal(kSummary.dreamVaultsCount, 2);
 });
 
+import {
+  parseHeroImagesPayload,
+  serializeHeroImagesPayload,
+} from './localVaultStorage';
+
+test('serializeHeroImagesPayload and parseHeroImagesPayload preserve multi-photo banner slides without truncation and calculateLoanAmortizationSchedule honors Bank EMI on connected Loan Accounts', () => {
+  const slide1 = 'data:image/jpeg;base64,AAA111';
+  const slide2 = 'data:image/jpeg;base64,BBB222';
+  const slide3 = 'data:image/jpeg;base64,CCC333';
+
+  const serialized = serializeHeroImagesPayload([slide1, slide2, slide3]);
+  assert.ok(serialized);
+  const parsed = parseHeroImagesPayload(serialized);
+  assert.deepEqual(parsed, [slide1, slide2, slide3]);
+
+  // Connected Loan Account ("About to Start") with EMI Given by Bank override
+  const aboutToStartWithBankEmi: LoanRecord = {
+    id: 'loan-conn-1',
+    name: 'SBI Car Loan Account',
+    loanType: 'proper_emi',
+    category: 'Car Loan',
+    principalAmount: 600000,
+    interestRateAnnual: 9,
+    tenureMonths: 36,
+    tenureUnit: 'Months',
+    startDate: '2026-12-01',
+    linkedAccountId: 'acc-sbi',
+    connectedLoanAccountId: 'acc-loan-card-1',
+    status: 'About to Start',
+    customSuggestedEmi: 20500, // Bank-given EMI
+    payments: [],
+    createdAt: '2026-11-12T00:00:00.000Z',
+  };
+
+  const schedAbout = calculateLoanAmortizationSchedule(aboutToStartWithBankEmi);
+  assert.equal(schedAbout.scheduledMonthlyEmi, 20500);
+  assert.equal(schedAbout.remainingBalance, 600000);
+  assert.equal(schedAbout.rows[0].emiAmount, 20500);
+});
+
+

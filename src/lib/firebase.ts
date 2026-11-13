@@ -233,15 +233,56 @@ export function subscribeToGlobalCloudConfig(callbacks: {
     pdfHeaderConfig: PdfHeaderImageConfig;
   };
 }): () => void {
+  let cancelled = false;
+
+  // 1. Always hydrate from Server Mirror first (works even during Firestore free-tier quota cooldown or across browsers/Incognito)
+  void (async () => {
+    const mirror = await fetchFromServerMirror();
+    if (cancelled || !mirror || !mirror.globalConfig) return;
+    const mirrorUpdatedAt = mirror.globalConfig.updatedAt || 0;
+    const localUpdatedAt = getLocalGlobalConfigUpdatedAt();
+    const initialLocal = callbacks.getInitialLocalState();
+    const localHasHero = parseHeroImagesPayload(initialLocal.heroImage).length > 0;
+    const mirrorHero =
+      typeof mirror.globalConfig.landingHeroImage === 'string' &&
+      mirror.globalConfig.landingHeroImage.length > 0
+        ? mirror.globalConfig.landingHeroImage
+        : null;
+
+    if (mirrorHero && (!localHasHero || mirrorUpdatedAt >= localUpdatedAt)) {
+      saveLandingHeroImage(mirrorHero, false);
+      callbacks.onHeroImage(mirrorHero);
+    } else if (mirror.globalConfig.landingHeroImage === null && mirrorUpdatedAt > localUpdatedAt) {
+      saveLandingHeroImage(null, false);
+      callbacks.onHeroImage(null);
+    }
+
+    if (
+      mirror.globalConfig.pdfHeaderConfig &&
+      typeof mirror.globalConfig.pdfHeaderConfig === 'object' &&
+      mirrorUpdatedAt >= localUpdatedAt
+    ) {
+      const mergedPdf: PdfHeaderImageConfig = {
+        ...DEFAULT_PDF_HEADER_CONFIG,
+        ...mirror.globalConfig.pdfHeaderConfig,
+      };
+      savePdfHeaderConfig(mergedPdf, false);
+      callbacks.onPdfHeaderConfig(mergedPdf);
+    }
+  })();
+
   if (!canCallFirestoreNow()) {
-    return () => {};
+    return () => {
+      cancelled = true;
+    };
   }
   const configRef = doc(db, 'globalConfig', 'main');
   let seededInitial = false;
 
-  return onSnapshot(
+  const unsub = onSnapshot(
     configRef,
     (snap) => {
+      if (cancelled) return;
       if (!snap.exists()) {
         if (!seededInitial) {
           seededInitial = true;
@@ -268,8 +309,13 @@ export function subscribeToGlobalCloudConfig(callbacks: {
         typeof data.landingHeroImage === 'string' && data.landingHeroImage.length > 0
           ? data.landingHeroImage
           : null;
-      saveLandingHeroImage(cloudHero, false);
-      callbacks.onHeroImage(cloudHero);
+      const currentLocalHero = callbacks.getInitialLocalState().heroImage;
+
+      // Only apply cloudHero if it has photos OR if local doesn't have newer unsynced photos
+      if (cloudHero || !currentLocalHero || cloudUpdatedAtMs > localUpdatedAtMs) {
+        saveLandingHeroImage(cloudHero, false);
+        callbacks.onHeroImage(cloudHero);
+      }
 
       if (typeof data.pdfHeaderJson === 'string' && data.pdfHeaderJson.length >= 2) {
         try {
@@ -302,18 +348,26 @@ export function subscribeToGlobalCloudConfig(callbacks: {
       markQuotaExhaustedIfMatched(err);
     }
   );
+
+  return () => {
+    cancelled = true;
+    unsub();
+  };
 }
 
 /**
- * Pushes updated Front Page Hero Image and PDF Header Config to `/globalConfig/main` in Firestore.
+ * Pushes updated Front Page Hero Image and PDF Header Config to Server Mirror and `/globalConfig/main` in Firestore.
  */
 export async function saveGlobalCloudConfig(
   landingHeroImage: string | null,
   pdfHeaderConfig: PdfHeaderImageConfig
 ): Promise<void> {
+  const heroList = parseHeroImagesPayload(landingHeroImage);
+  const normalizedHero = heroList.length > 0 ? JSON.stringify(heroList) : null;
+
   await pushToServerMirror({
     globalConfig: {
-      landingHeroImage,
+      landingHeroImage: normalizedHero,
       pdfHeaderConfig: pdfHeaderConfig || DEFAULT_PDF_HEADER_CONFIG,
       updatedAt: Date.now(),
     },
@@ -330,10 +384,7 @@ export async function saveGlobalCloudConfig(
   }
 
   let safeHero = '';
-  const heroList = parseHeroImagesPayload(landingHeroImage);
-  if (heroList.length === 1) {
-    safeHero = heroList[0].length <= 850000 - safePdfJson.length ? heroList[0] : '';
-  } else if (heroList.length > 1) {
+  if (heroList.length > 0) {
     const fitting: string[] = [];
     for (const img of heroList) {
       const candidate = JSON.stringify([...fitting, img]);
@@ -1628,7 +1679,12 @@ export async function fetchLiveFirebaseAdminOverview(params: {
   const vaultSummaries: FirebaseVaultDocSummary[] = [];
 
   // 2. Inspect Global Config images (/globalConfig/main)
-  const heroList = parseHeroImagesPayload(params.heroImage);
+  const mirrorSnap = await fetchFromServerMirror();
+  const effectiveHeroRaw =
+    params.heroImage && parseHeroImagesPayload(params.heroImage).length > 0
+      ? params.heroImage
+      : mirrorSnap?.globalConfig?.landingHeroImage || null;
+  const heroList = parseHeroImagesPayload(effectiveHeroRaw);
   heroList.forEach((imgDataUrl, idx) => {
     if (imgDataUrl && imgDataUrl.length > 0) {
       storedImages.push({

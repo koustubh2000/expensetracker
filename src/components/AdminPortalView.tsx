@@ -373,29 +373,70 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [users.length, landingHeroImage, draftPdfHeader.imageUrl]);
 
+  const heroFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [adminBannerPreviewIdx, setAdminBannerPreviewIdx] = useState(0);
+
+  useEffect(() => {
+    if (heroImagesList.length <= 1) {
+      setAdminBannerPreviewIdx(0);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setAdminBannerPreviewIdx((prev) => (prev + 1) % heroImagesList.length);
+    }, 3500);
+    return () => window.clearInterval(timer);
+  }, [heroImagesList.length]);
+
+  const readFileAsDataUrlFallback = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () =>
+        typeof reader.result === 'string'
+          ? resolve(reader.result)
+          : reject(new Error('Empty file result'));
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+
   const processHeroImageFiles = async (files: File[]) => {
     if (!files || files.length === 0) return;
     try {
       const uploadedUrls: string[] = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        if (!file.type.startsWith('image/')) continue;
-        // Compress each banner photo cleanly so multiple photos fit inside Firestore's document limit
-        const dataUrl = await compressImageFileToDataUrl(file, 720, 0.78);
-        uploadedUrls.push(dataUrl);
+        const isImg =
+          file.type.startsWith('image/') ||
+          /\.(png|jpe?g|webp|gif|svg|bmp|avif|ico)$/i.test(file.name || '');
+        if (!isImg) continue;
+        try {
+          // Compress each banner photo cleanly so multiple photos fit inside Firestore's document limit
+          const dataUrl = await compressImageFileToDataUrl(file, 720, 0.8);
+          if (dataUrl && dataUrl.startsWith('data:')) {
+            uploadedUrls.push(dataUrl);
+          }
+        } catch {
+          const fallbackUrl = await readFileAsDataUrlFallback(file);
+          if (fallbackUrl && fallbackUrl.startsWith('data:')) {
+            uploadedUrls.push(fallbackUrl);
+          }
+        }
       }
-      if (uploadedUrls.length === 0) return;
+      if (uploadedUrls.length === 0) {
+        setErrorBanner('Please select valid image files (PNG, JPG, WEBP, GIF, or SVG).');
+        return;
+      }
       const combined = [...heroImagesList, ...uploadedUrls];
       const serialized = serializeHeroImagesPayload(combined);
       const savedCount = parseHeroImagesPayload(serialized).length;
       onUpdateLandingHeroImage(serialized || null);
+      setAdminBannerPreviewIdx(Math.max(0, savedCount - 1));
       setStatusBanner(
-        `Uploaded ${uploadedUrls.length} photo(s) to Front Page Hero Banner (${savedCount} total active)! Automatically synced across Desktop & Mobile.`
+        `Uploaded & saved ${uploadedUrls.length} photo(s) to Front Page Hero Banner (${savedCount} total active in database)! Automatically synced to Firebase & Public Landing Page.`
       );
       onTriggerFeedback(
         uploadedUrls.length > 1
-          ? `${uploadedUrls.length} Banner Photos Uploaded`
-          : 'Banner Photo Uploaded Successfully',
+          ? `${uploadedUrls.length} Banner Photos Saved to Database`
+          : 'Banner Photo Saved to Database',
         'success'
       );
     } catch {
@@ -415,12 +456,13 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
     const remaining = heroImagesList.filter((_, idx) => idx !== indexToRemove);
     const serialized = serializeHeroImagesPayload(remaining);
     onUpdateLandingHeroImage(serialized || null);
+    setAdminBannerPreviewIdx(0);
     setStatusBanner(
       remaining.length > 0
-        ? `Removed photo #${indexToRemove + 1}. ${remaining.length} banner photo(s) remaining and Firebase storage updated.`
+        ? `Removed photo #${indexToRemove + 1}. ${remaining.length} banner photo(s) remaining and Firebase database updated.`
         : 'All custom banner photos removed. Restored default Indian Family poster and freed Firebase storage.'
     );
-    onTriggerFeedback('Banner Photo Deleted & Storage Updated', 'success', 'toast');
+    onTriggerFeedback('Banner Photo Deleted & Database Updated', 'success', 'toast');
   };
 
   const processPdfHeaderImageFile = async (file: File) => {
@@ -2802,10 +2844,16 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
         {/* 3. MULTI-PHOTO FRONT PAGE BANNER MANAGER & ADMIN PASSWORD SETTINGS */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left: Upload / Manage Multiple Front Page Banner Photos */}
-          <section className="lg:col-span-7 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-4">
+          <section
+            data-testid="admin-front-banner-studio"
+            className="lg:col-span-7 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-4"
+          >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                <h3
+                  data-testid="admin-front-banner-studio-heading"
+                  className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2"
+                >
                   <Images className="w-5 h-5 text-rose-600" />
                   Front Page Multi-Photo Scrolling Banner Studio ({heroImagesList.length} Active)
                 </h3>
@@ -2845,48 +2893,117 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                 tabIndex={0}
                 className="flex flex-wrap items-center gap-2 outline-none"
               >
-                <label
-                  htmlFor="admin-front-image-upload"
+                <input
+                  ref={heroFileInputRef}
+                  id="admin-front-image-upload"
+                  data-testid="admin-front-image-upload-input"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleHeroImageFileChange}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  data-testid="upload-hero-banner-btn"
+                  onClick={() => heroFileInputRef.current?.click()}
                   title="Click, drag & drop, or paste (Ctrl+V) banner photos"
                   className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
                 >
                   <ImagePlus className="w-4 h-4" />
                   <span>+ Upload / Drop / Paste Banner Photos</span>
-                  <input
-                    id="admin-front-image-upload"
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    onChange={handleHeroImageFileChange}
-                    className="hidden"
-                  />
-                </label>
+                </button>
                 {heroImagesList.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onUpdateLandingHeroImage(null);
-                      setStatusBanner(
-                        'Cleared all custom banner photos, restored default Indian Family poster, and freed Firebase storage.'
-                      );
-                      onTriggerFeedback('Restored Default Front Page Banner', 'success');
-                    }}
-                    className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                    Clear All ({heroImagesList.length})
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      data-testid="save-hero-banner-db-btn"
+                      onClick={() => {
+                        const serialized = serializeHeroImagesPayload(heroImagesList);
+                        onUpdateLandingHeroImage(serialized || null);
+                        void handleRefreshLiveFirebaseData(false);
+                        setStatusBanner(
+                          `Saved & verified ${heroImagesList.length} banner photo(s) in Firebase Database (/globalConfig/main) & Public Front Page!`
+                        );
+                        onTriggerFeedback(
+                          `Banner Saved to Firebase (${heroImagesList.length} Active)`,
+                          'success',
+                          'toast'
+                        );
+                      }}
+                      className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Save &amp; Sync ({heroImagesList.length})</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="clear-all-hero-banner-btn"
+                      onClick={() => {
+                        onUpdateLandingHeroImage(null);
+                        setAdminBannerPreviewIdx(0);
+                        setStatusBanner(
+                          'Cleared all custom banner photos, restored default Indian Family poster, and freed Firebase storage.'
+                        );
+                        onTriggerFeedback('Restored Default Front Page Banner', 'success');
+                      }}
+                      className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                      Clear All ({heroImagesList.length})
+                    </button>
+                  </>
                 )}
               </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 min-h-[200px] flex flex-col justify-center">
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const files = e.dataTransfer?.files ? Array.from(e.dataTransfer.files) : [];
+                if (files.length > 0) void processHeroImageFiles(files);
+              }}
+              className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 min-h-[200px] flex flex-col justify-center"
+            >
               {heroImagesList.length > 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-4">
+                  {/* Live Auto-Scrolling Banner Preview right inside Admin Studio */}
+                  <div
+                    data-testid="admin-banner-live-carousel-preview"
+                    className="relative rounded-xl overflow-hidden border border-emerald-500/30 bg-slate-900 p-2"
+                  >
+                    <div className="flex items-center justify-between px-2 pb-1.5 text-[11px] font-bold text-emerald-300">
+                      <span>
+                        LIVE FRONT PAGE BANNER PREVIEW (Slide{' '}
+                        {Math.min(adminBannerPreviewIdx + 1, heroImagesList.length)} of{' '}
+                        {heroImagesList.length})
+                      </span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-200">
+                        Synced to /globalConfig/main
+                      </span>
+                    </div>
+                    <div className="relative h-44 w-full rounded-lg overflow-hidden bg-slate-950 flex items-center justify-center">
+                      <img
+                        src={
+                          heroImagesList[adminBannerPreviewIdx % heroImagesList.length] ||
+                          heroImagesList[0]
+                        }
+                        alt="Live Front Page Banner Preview"
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {heroImagesList.map((imgUrl, idx) => (
                       <div
                         key={idx}
+                        data-testid={`admin-banner-slide-card-${idx + 1}`}
                         className="relative group rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-1.5 flex flex-col justify-between"
                       >
                         <span className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-slate-950/80 text-white font-mono font-bold text-[10px]">
@@ -2895,7 +3012,8 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                         <img
                           src={imgUrl}
                           alt={`Uploaded Front Page Banner Slide ${idx + 1}`}
-                          className="w-full h-28 object-cover rounded-lg"
+                          onClick={() => setAdminBannerPreviewIdx(idx)}
+                          className="w-full h-28 object-cover rounded-lg cursor-pointer"
                         />
                         <div className="pt-1.5 flex items-center justify-between gap-2 text-[10px]">
                           <span className="font-mono text-slate-500">
@@ -2903,6 +3021,7 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                           </span>
                           <button
                             type="button"
+                            data-testid={`delete-banner-slide-btn-${idx + 1}`}
                             onClick={() => handleRemoveSingleHeroPhoto(idx)}
                             className="px-2 py-1 rounded-md bg-rose-500/10 hover:bg-rose-600 text-rose-600 hover:text-white font-bold flex items-center gap-1 transition cursor-pointer"
                           >
@@ -2914,18 +3033,23 @@ export const AdminPortalView: React.FC<AdminPortalViewProps> = ({
                     ))}
                   </div>
                   <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold text-center">
-                    ✓ {heroImagesList.length} Photo(s) Active in Public Page Auto-Sliding &amp;
-                    Scrolling Banner Carousel
+                    ✓ {heroImagesList.length} Photo(s) Active &amp; Saved in Database for Public Page
+                    Auto-Sliding &amp; Scrolling Banner Carousel
                   </p>
                 </div>
               ) : (
-                <div className="text-center space-y-1.5 text-xs text-slate-500">
+                <div
+                  onClick={() => heroFileInputRef.current?.click()}
+                  className="text-center space-y-2 text-xs text-slate-500 py-6 cursor-pointer hover:bg-slate-100/60 dark:hover:bg-slate-900/60 rounded-xl transition"
+                >
+                  <ImagePlus className="w-8 h-8 text-rose-500 mx-auto opacity-80" />
                   <p className="font-bold text-slate-700 dark:text-slate-300">
-                    Default Royal Blue Saree Indian Family Illustration Active
+                    Default Royal Blue Saree Indian Family Illustration Active (0 Custom Photos)
                   </p>
                   <p>
-                    Click &ldquo;+ Upload Banner Photos (Multi)&rdquo; above to select 1 or multiple
-                    photos for the animated scrolling hero banner on the public index page.
+                    Click here or click &ldquo;+ Upload / Drop / Paste Banner Photos&rdquo; above to
+                    select 1 or multiple photos for the animated scrolling hero banner on the public
+                    index page.
                   </p>
                 </div>
               )}

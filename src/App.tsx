@@ -1103,11 +1103,51 @@ export default function App() {
     if (isCloudSession && firebaseUser) {
       await saveCloudAccount(firebaseUser.uid, accountObj);
     } else {
+      const updatedAccounts = isEdit
+        ? vault.accounts.map((a) => (a.id === accountObj.id ? accountObj : a))
+        : [...vault.accounts, accountObj];
+
+      const updatedLoans =
+        accountObj.type === 'Loan Account'
+          ? (vault.loans || []).map((ln) => {
+              if (
+                ln.connectedLoanAccountId === accountObj.id ||
+                accountObj.connectedLoanRecordId === ln.id
+              ) {
+                return {
+                  ...ln,
+                  connectedLoanAccountId: accountObj.id,
+                  status: accountObj.loanStatus || ln.status,
+                  principalAmount:
+                    accountObj.sanctionedLoanAmount && accountObj.sanctionedLoanAmount > 0
+                      ? accountObj.sanctionedLoanAmount
+                      : ln.principalAmount,
+                  currentRemainingAmount:
+                    accountObj.currentRemainingLoanAmount !== undefined
+                      ? accountObj.currentRemainingLoanAmount
+                      : ln.currentRemainingAmount,
+                  customSuggestedEmi:
+                    accountObj.bankGivenEmi && accountObj.bankGivenEmi > 0
+                      ? accountObj.bankGivenEmi
+                      : ln.customSuggestedEmi,
+                  interestRateAnnual:
+                    accountObj.loanInterestRate !== undefined
+                      ? accountObj.loanInterestRate
+                      : ln.interestRateAnnual,
+                  tenureMonths:
+                    accountObj.loanTenureMonths && accountObj.loanTenureMonths > 0
+                      ? accountObj.loanTenureMonths
+                      : ln.tenureMonths,
+                };
+              }
+              return ln;
+            })
+          : vault.loans;
+
       persistVaultChange({
         ...vault,
-        accounts: isEdit
-          ? vault.accounts.map((a) => (a.id === accountObj.id ? accountObj : a))
-          : [...vault.accounts, accountObj],
+        accounts: updatedAccounts,
+        loans: updatedLoans,
       });
     }
     triggerFeedback(
@@ -2434,8 +2474,33 @@ export default function App() {
       ? currentLoans.map((l) => (l.id === loan.id ? loan : l))
       : [loan, ...currentLoans];
 
+    const sched = calculateLoanAmortizationSchedule(loan);
+    const updatedAccounts = vault.accounts.map((acc) => {
+      if (loan.connectedLoanAccountId && acc.id === loan.connectedLoanAccountId) {
+        return {
+          ...acc,
+          connectedLoanRecordId: loan.id,
+          loanStatus: loan.status,
+          sanctionedLoanAmount: loan.principalAmount,
+          currentRemainingLoanAmount: sched.remainingBalance,
+          bankGivenEmi: loan.customSuggestedEmi || sched.scheduledMonthlyEmi,
+          loanInterestRate: loan.interestRateAnnual,
+          loanTenureMonths: loan.tenureMonths,
+          initialBalance: sched.remainingBalance,
+        };
+      }
+      if (acc.connectedLoanRecordId === loan.id && loan.connectedLoanAccountId !== acc.id) {
+        return {
+          ...acc,
+          connectedLoanRecordId: undefined,
+        };
+      }
+      return acc;
+    });
+
     persistVaultChange({
       ...vault,
+      accounts: updatedAccounts,
       loans: updatedLoans,
     });
     triggerFeedback(
@@ -2461,8 +2526,15 @@ export default function App() {
       loan: targetLoan,
     });
 
+    const updatedAccounts = vault.accounts.map((acc) =>
+      acc.connectedLoanRecordId === loanId
+        ? { ...acc, connectedLoanRecordId: undefined }
+        : acc
+    );
+
     persistVaultChange({
       ...vault,
+      accounts: updatedAccounts,
       loans: currentLoans.filter((l) => l.id !== loanId),
       recycleBin: nextBin,
     });
@@ -2515,8 +2587,25 @@ export default function App() {
       ],
     };
 
+    const newSched = calculateLoanAmortizationSchedule(updatedLoan);
+    const updatedAccounts = vault.accounts.map((acc) => {
+      if (
+        (updatedLoan.connectedLoanAccountId && acc.id === updatedLoan.connectedLoanAccountId) ||
+        acc.connectedLoanRecordId === updatedLoan.id
+      ) {
+        return {
+          ...acc,
+          loanStatus: 'In Progress' as const,
+          currentRemainingLoanAmount: newSched.remainingBalance,
+          initialBalance: newSched.remainingBalance,
+        };
+      }
+      return acc;
+    });
+
     persistVaultChange({
       ...vault,
+      accounts: updatedAccounts,
       nextRecordNumber: allocated.nextRecordNumber,
       transactions: [emiTx, ...vault.transactions],
       loans: currentLoans.map((l) => (l.id === updatedLoan.id ? updatedLoan : l)),
@@ -2569,6 +2658,7 @@ export default function App() {
     };
 
     let updatedLoans = currentLoans;
+    let syncedRemainingFromSchedule: number | undefined;
     if (targetLoan && shouldSyncLoan) {
       const summary = calculateLoanAmortizationSchedule(targetLoan);
       const nextUpcomingRow =
@@ -2594,11 +2684,33 @@ export default function App() {
           },
         ],
       };
+      syncedRemainingFromSchedule = calculateLoanAmortizationSchedule(updatedLoan).remainingBalance;
       updatedLoans = currentLoans.map((l) => (l.id === updatedLoan.id ? updatedLoan : l));
     }
 
+    const updatedAccounts = vault.accounts.map((acc) => {
+      if (
+        (targetLoan?.connectedLoanAccountId && acc.id === targetLoan.connectedLoanAccountId) ||
+        (targetLoan && acc.connectedLoanRecordId === targetLoan.id) ||
+        (params.destinationLoanAccountId && acc.id === params.destinationLoanAccountId && acc.type === 'Loan Account')
+      ) {
+        const nextRem =
+          syncedRemainingFromSchedule !== undefined
+            ? syncedRemainingFromSchedule
+            : Math.max(0, (acc.currentRemainingLoanAmount ?? Math.abs(acc.initialBalance)) - params.amount);
+        return {
+          ...acc,
+          loanStatus: 'In Progress' as const,
+          currentRemainingLoanAmount: nextRem,
+          initialBalance: nextRem,
+        };
+      }
+      return acc;
+    });
+
     persistVaultChange({
       ...vault,
+      accounts: updatedAccounts,
       nextRecordNumber: allocated.nextRecordNumber,
       transactions: [emiTx, ...vault.transactions],
       loans: updatedLoans,
@@ -3530,17 +3642,30 @@ export default function App() {
                             <div className="mt-3 flex items-center justify-between text-[11px] text-white/85">
                               <span className="font-mono">A/C: {maskedNumber}</span>
                               <span className="px-2 py-0.5 rounded-md bg-white/15 border border-white/20 text-[10px] font-bold uppercase tracking-wider text-white">
-                                Bank Loan A/C
+                                {acc.loanStatus || 'In Progress'}
                               </span>
                             </div>
 
+                            {acc.bankGivenEmi !== undefined && acc.bankGivenEmi > 0 && (
+                              <div className="mt-1.5 flex items-center justify-between text-[11px] text-amber-200 font-semibold">
+                                <span>EMI Given by Bank</span>
+                                <span className="font-mono font-bold">
+                                  {currency}
+                                  {acc.bankGivenEmi.toLocaleString()}/mo
+                                </span>
+                              </div>
+                            )}
+
                             <div className="mt-2.5 pt-2.5 border-t border-white/15 flex items-baseline justify-between gap-2">
                               <span className="text-[10px] font-extrabold uppercase tracking-wider text-white/80">
-                                LOAN BALANCE
+                                REMAINING LOAN
                               </span>
                               <span className="text-lg font-extrabold font-mono tabular-nums text-white">
                                 {currency}
-                                {Math.abs(actualBalance).toLocaleString(undefined, {
+                                {(acc.currentRemainingLoanAmount !== undefined
+                                  ? acc.currentRemainingLoanAmount
+                                  : Math.abs(actualBalance)
+                                ).toLocaleString(undefined, {
                                   minimumFractionDigits: 2,
                                   maximumFractionDigits: 2,
                                 })}

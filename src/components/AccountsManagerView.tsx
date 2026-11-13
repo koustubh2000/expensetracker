@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import {
   AccountType,
+  LoanStatus,
   RecurringPaymentItem,
   TransactionRecord,
   WalletAccount,
@@ -69,6 +70,7 @@ const POPULAR_BANKS_QUICK_PICK = [
   'Axis Bank',
   'Kotak Mahindra Bank',
   'Bank of Baroda',
+  'Bank of India',
   'Punjab National Bank (PNB)',
   'Canara Bank',
   'IDFC First Bank',
@@ -114,6 +116,14 @@ export const AccountsManagerView: React.FC<AccountsManagerViewProps> = ({
   const [accColor, setAccColor] = useState(CARD_COLOR_SWATCHES[0].hex);
   const [accIncludeInNetWorth, setAccIncludeInNetWorth] = useState(true);
 
+  // Loan Account Specific State (when accType === 'Loan Account')
+  const [accLoanStatus, setAccLoanStatus] = useState<LoanStatus>('In Progress');
+  const [accSanctionedLoanAmount, setAccSanctionedLoanAmount] = useState('');
+  const [accCurrentRemainingLoanAmount, setAccCurrentRemainingLoanAmount] = useState('');
+  const [accBankGivenEmi, setAccBankGivenEmi] = useState('');
+  const [accLoanInterestRate, setAccLoanInterestRate] = useState('');
+  const [accLoanTenureMonths, setAccLoanTenureMonths] = useState('');
+
   const formatMoney = (val: number) =>
     `${currency}${val.toLocaleString(undefined, {
       minimumFractionDigits: 2,
@@ -133,6 +143,12 @@ export const AccountsManagerView: React.FC<AccountsManagerViewProps> = ({
     setAccInitialBalance('0');
     setAccColor(CARD_COLOR_SWATCHES[1].hex);
     setAccIncludeInNetWorth(true);
+    setAccLoanStatus('In Progress');
+    setAccSanctionedLoanAmount('');
+    setAccCurrentRemainingLoanAmount('');
+    setAccBankGivenEmi('');
+    setAccLoanInterestRate('');
+    setAccLoanTenureMonths('');
     setUseRemoteFavicon(false);
     setShowModal(true);
   };
@@ -150,6 +166,24 @@ export const AccountsManagerView: React.FC<AccountsManagerViewProps> = ({
     setAccInitialBalance(String(acc.initialBalance));
     setAccColor(acc.color || CARD_COLOR_SWATCHES[1].hex);
     setAccIncludeInNetWorth(acc.includeInNetWorth !== false);
+    setAccLoanStatus(acc.loanStatus || 'In Progress');
+    setAccSanctionedLoanAmount(
+      acc.sanctionedLoanAmount !== undefined
+        ? String(acc.sanctionedLoanAmount)
+        : acc.type === 'Loan Account' && acc.initialBalance
+        ? String(Math.abs(acc.initialBalance))
+        : ''
+    );
+    setAccCurrentRemainingLoanAmount(
+      acc.currentRemainingLoanAmount !== undefined
+        ? String(acc.currentRemainingLoanAmount)
+        : acc.type === 'Loan Account'
+        ? String(Math.abs(acc.initialBalance))
+        : ''
+    );
+    setAccBankGivenEmi(acc.bankGivenEmi !== undefined ? String(acc.bankGivenEmi) : '');
+    setAccLoanInterestRate(acc.loanInterestRate !== undefined ? String(acc.loanInterestRate) : '');
+    setAccLoanTenureMonths(acc.loanTenureMonths !== undefined ? String(acc.loanTenureMonths) : '');
     setUseRemoteFavicon(Boolean(acc.bankLogoUrl?.startsWith('http')));
     setShowModal(true);
   };
@@ -255,6 +289,39 @@ export const AccountsManagerView: React.FC<AccountsManagerViewProps> = ({
       synced.logoUrl ||
       generateBankFallbackSvgDataUrl(accName.trim(), accColor);
 
+    const existingAcc = editingAccountId
+      ? accounts.find((a) => a.id === editingAccountId)
+      : undefined;
+    const isLoanAcc = accType === 'Loan Account';
+    const parsedSanctioned = isLoanAcc
+      ? Math.max(
+          0,
+          Number(accSanctionedLoanAmount) ||
+            Number(accCurrentRemainingLoanAmount) ||
+            Math.abs(Number(accInitialBalance)) ||
+            0
+        )
+      : undefined;
+    const parsedRemaining = isLoanAcc
+      ? accLoanStatus === 'About to Start' && accCurrentRemainingLoanAmount.trim() === ''
+        ? parsedSanctioned || 0
+        : accCurrentRemainingLoanAmount.trim() !== ''
+        ? Math.max(0, Number(accCurrentRemainingLoanAmount) || 0)
+        : Math.max(0, Math.abs(Number(accInitialBalance)) || parsedSanctioned || 0)
+      : undefined;
+    const parsedBankEmi =
+      isLoanAcc && accBankGivenEmi.trim() !== '' && Number(accBankGivenEmi) > 0
+        ? Math.round(Number(accBankGivenEmi) * 100) / 100
+        : undefined;
+    const parsedLoanRate =
+      isLoanAcc && accLoanInterestRate.trim() !== '' && Number(accLoanInterestRate) >= 0
+        ? Number(accLoanInterestRate)
+        : undefined;
+    const parsedLoanTenure =
+      isLoanAcc && accLoanTenureMonths.trim() !== '' && Number(accLoanTenureMonths) > 0
+        ? Math.round(Number(accLoanTenureMonths))
+        : undefined;
+
     const payload: WalletAccount = {
       id: editingAccountId || `acc-${Date.now()}`,
       name: accName.trim(),
@@ -265,9 +332,18 @@ export const AccountsManagerView: React.FC<AccountsManagerViewProps> = ({
       bankDetails: accBankDetails.trim() || undefined,
       bankLogoUrl: finalLogo,
       currency,
-      initialBalance: Number(accInitialBalance) || 0,
+      initialBalance: isLoanAcc
+        ? parsedRemaining ?? (Number(accInitialBalance) || 0)
+        : Number(accInitialBalance) || 0,
       color: accColor || synced.suggestedColor || '#1e3a8a',
       includeInNetWorth: accIncludeInNetWorth,
+      loanStatus: isLoanAcc ? accLoanStatus : undefined,
+      sanctionedLoanAmount: isLoanAcc ? parsedSanctioned : undefined,
+      currentRemainingLoanAmount: isLoanAcc ? parsedRemaining : undefined,
+      bankGivenEmi: isLoanAcc ? parsedBankEmi : undefined,
+      loanInterestRate: isLoanAcc ? parsedLoanRate : undefined,
+      loanTenureMonths: isLoanAcc ? parsedLoanTenure : undefined,
+      connectedLoanRecordId: isLoanAcc ? existingAcc?.connectedLoanRecordId : undefined,
     };
 
     onSaveAccount(payload, Boolean(editingAccountId));
@@ -443,7 +519,13 @@ export const AccountsManagerView: React.FC<AccountsManagerViewProps> = ({
               <select
                 data-testid="account-type-select"
                 value={accType}
-                onChange={(e) => setAccType(e.target.value as AccountType)}
+                onChange={(e) => {
+                  const nextType = e.target.value as AccountType;
+                  setAccType(nextType);
+                  if (nextType === 'Loan Account') {
+                    setAccIncludeInNetWorth(false);
+                  }
+                }}
                 className="w-full px-3.5 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
               >
                 {editableAccountTypes.map((t) => (
@@ -472,7 +554,7 @@ export const AccountsManagerView: React.FC<AccountsManagerViewProps> = ({
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Account / Card Number (Masked on Dashboard)
+                Account / Loan Account Number (Masked on Dashboard)
               </label>
               <input
                 type="text"
@@ -484,20 +566,22 @@ export const AccountsManagerView: React.FC<AccountsManagerViewProps> = ({
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Opening / Initial Balance ({currency})
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                data-testid="account-initial-balance-input"
-                value={accInitialBalance}
-                onChange={(e) => setAccInitialBalance(e.target.value)}
-                required
-                className="w-full px-3.5 py-2 text-xs font-mono tabular-nums rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
-              />
-            </div>
+            {accType !== 'Loan Account' && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Opening / Initial Balance ({currency})
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  data-testid="account-initial-balance-input"
+                  value={accInitialBalance}
+                  onChange={(e) => setAccInitialBalance(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2 text-xs font-mono tabular-nums rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+                />
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -525,6 +609,176 @@ export const AccountsManagerView: React.FC<AccountsManagerViewProps> = ({
               />
             </div>
           </div>
+
+          {/* Dedicated Loan Account Configuration Block (Current Loan: About to Start vs In Progress, EMI Given by Bank, Current Remaining Account Balance) */}
+          {accType === 'Loan Account' && (
+            <div
+              data-testid="loan-account-config-panel"
+              className="p-4 sm:p-5 rounded-2xl border-2 border-indigo-500/40 bg-indigo-500/5 dark:bg-indigo-950/20 space-y-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-indigo-500/20">
+                <div>
+                  <h4 className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-indigo-900 dark:text-indigo-200">
+                    Loan Account Configuration (Connectable in Loans &amp; EMI Tab)
+                  </h4>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                    Set whether this loan is <strong>About to Start</strong> or{' '}
+                    <strong>In Progress</strong>, the <strong>EMI Given by Bank</strong>, and the{' '}
+                    <strong>Current Remaining Loan Balance</strong>. You can connect this Loan
+                    Account directly inside the Loans &amp; EMI Amortization section!
+                  </p>
+                </div>
+                <span className="px-2.5 py-1 rounded-full bg-indigo-600 text-white text-[10px] font-extrabold uppercase tracking-wider">
+                  Loan Account Card
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* 1. Current Loan Status: About to Start vs In Progress */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1">
+                    Current Loan Status
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      data-testid="account-loan-status-about-to-start"
+                      onClick={() => {
+                        setAccLoanStatus('About to Start');
+                        if (accSanctionedLoanAmount.trim() !== '') {
+                          setAccCurrentRemainingLoanAmount(accSanctionedLoanAmount);
+                          setAccInitialBalance(accSanctionedLoanAmount);
+                        }
+                      }}
+                      className={`py-2 px-3 rounded-lg text-xs font-extrabold border transition cursor-pointer ${
+                        accLoanStatus === 'About to Start'
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      About to Start
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="account-loan-status-in-progress"
+                      onClick={() => setAccLoanStatus('In Progress')}
+                      className={`py-2 px-3 rounded-lg text-xs font-extrabold border transition cursor-pointer ${
+                        accLoanStatus === 'In Progress'
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                          : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      In Progress
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Total Sanctioned / Principal Loan Amount */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1">
+                    Total Sanctioned / Principal Loan ({currency})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    data-testid="account-loan-sanctioned-input"
+                    value={accSanctionedLoanAmount}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setAccSanctionedLoanAmount(val);
+                      if (
+                        accLoanStatus === 'About to Start' ||
+                        accCurrentRemainingLoanAmount.trim() === ''
+                      ) {
+                        setAccCurrentRemainingLoanAmount(val);
+                        setAccInitialBalance(val || '0');
+                      }
+                    }}
+                    placeholder="e.g. 500000"
+                    className="w-full px-3.5 py-2 text-xs font-mono tabular-nums rounded-lg border border-indigo-500/40 bg-white dark:bg-slate-950"
+                  />
+                </div>
+
+                {/* 3. Current Remaining Loan Account Balance */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1">
+                    Current Remaining Loan Balance ({currency})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    data-testid="account-loan-remaining-input"
+                    value={accCurrentRemainingLoanAmount}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setAccCurrentRemainingLoanAmount(val);
+                      setAccInitialBalance(val || '0');
+                    }}
+                    placeholder={
+                      accLoanStatus === 'About to Start'
+                        ? 'Same as Sanctioned Principal'
+                        : 'e.g. 345000'
+                    }
+                    required
+                    className="w-full px-3.5 py-2 text-xs font-mono tabular-nums rounded-lg border border-indigo-500/40 bg-white dark:bg-slate-950"
+                  />
+                </div>
+
+                {/* 4. EMI Given by Bank */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1">
+                    EMI Given by Bank ({currency} / Month)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    data-testid="account-loan-bank-emi-input"
+                    value={accBankGivenEmi}
+                    onChange={(e) => setAccBankGivenEmi(e.target.value)}
+                    placeholder="e.g. 12500"
+                    className="w-full px-3.5 py-2 text-xs font-mono tabular-nums rounded-lg border border-indigo-500/40 bg-white dark:bg-slate-950"
+                  />
+                </div>
+
+                {/* 5. Interest Rate (% p.a. — Optional) */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1">
+                    Interest Rate (% p.a. — Optional)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    data-testid="account-loan-rate-input"
+                    value={accLoanInterestRate}
+                    onChange={(e) => setAccLoanInterestRate(e.target.value)}
+                    placeholder="e.g. 9.5"
+                    className="w-full px-3.5 py-2 text-xs font-mono tabular-nums rounded-lg border border-indigo-500/40 bg-white dark:bg-slate-950"
+                  />
+                </div>
+
+                {/* 6. Loan Tenure (Months — Optional) */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 mb-1">
+                    Total / Remaining Tenure (Months — Optional)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="600"
+                    data-testid="account-loan-tenure-input"
+                    value={accLoanTenureMonths}
+                    onChange={(e) => setAccLoanTenureMonths(e.target.value)}
+                    placeholder="e.g. 36"
+                    className="w-full px-3.5 py-2 text-xs font-mono tabular-nums rounded-lg border border-indigo-500/40 bg-white dark:bg-slate-950"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Card Color Swatches & Net Worth Toggle */}
           <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-slate-200 dark:border-slate-800">
@@ -648,6 +902,12 @@ export const AccountsManagerView: React.FC<AccountsManagerViewProps> = ({
               syncedLogo.logoUrl ||
               generateBankFallbackSvgDataUrl(acc.name, acc.color);
             const isRevealed = Boolean(revealedNumbers[acc.id]);
+            const isLoanCard = acc.type === 'Loan Account';
+            const effectiveLoanRemaining = isLoanCard
+              ? acc.currentRemainingLoanAmount !== undefined
+                ? acc.currentRemainingLoanAmount
+                : Math.abs(projection.actualBalance)
+              : projection.actualBalance;
 
             return (
               <div
@@ -679,9 +939,23 @@ export const AccountsManagerView: React.FC<AccountsManagerViewProps> = ({
                         <h3 className="text-sm font-extrabold tracking-tight text-white">
                           {acc.name}
                         </h3>
-                        <span className="text-[11px] text-white/80 font-medium">
-                          {resolveFlexibleLabel(acc.type, acc.customType)}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                          <span className="text-[11px] text-white/80 font-medium">
+                            {resolveFlexibleLabel(acc.type, acc.customType)}
+                          </span>
+                          {isLoanCard && (
+                            <span
+                              data-testid={`account-loan-status-badge-${acc.id}`}
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                                (acc.loanStatus || 'In Progress') === 'About to Start'
+                                  ? 'bg-indigo-500/40 text-indigo-100 border border-indigo-300/40'
+                                  : 'bg-emerald-500/40 text-emerald-100 border border-emerald-300/40'
+                              }`}
+                            >
+                              {acc.loanStatus || 'In Progress'}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -698,6 +972,7 @@ export const AccountsManagerView: React.FC<AccountsManagerViewProps> = ({
                         />
                         <button
                           type="button"
+                          data-testid={`edit-account-btn-${acc.id}`}
                           onClick={() => openEditAccountModal(acc)}
                           title="Edit Account"
                           className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer"
@@ -757,39 +1032,81 @@ export const AccountsManagerView: React.FC<AccountsManagerViewProps> = ({
                     )}
                   </div>
 
-                  {/* Current Actual Balance */}
+                  {/* Current Actual Balance / Current Remaining Loan Balance */}
                   <div className="mt-4 pt-3 border-t border-white/15 flex items-baseline justify-between">
                     <span className="text-[11px] uppercase tracking-wider text-white/75 font-bold">
-                      Current Balance
+                      {isLoanCard ? 'Current Remaining Loan' : 'Current Balance'}
                     </span>
                     <span
                       data-testid={`account-actual-balance-${acc.id}`}
                       className="text-xl font-extrabold font-mono tabular-nums text-white"
                     >
-                      {formatMoney(projection.actualBalance)}
+                      {formatMoney(isLoanCard ? effectiveLoanRemaining : projection.actualBalance)}
                     </span>
                   </div>
                 </div>
 
                 {/* Bottom Projection & Metadata Footer */}
                 <div className="p-4 bg-slate-50/70 dark:bg-slate-950/60 space-y-2 text-xs">
-                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
-                    <span>Upcoming Recurring Debits ({projection.pendingItemsCount}):</span>
-                    <span className="font-mono tabular-nums font-bold text-amber-600 dark:text-amber-400">
-                      -{formatMoney(projection.willBeDebitedTotal)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between pt-1.5 border-t border-slate-200/80 dark:border-slate-800">
-                    <span className="font-bold text-slate-700 dark:text-slate-300">
-                      Projected Balance After Debit:
-                    </span>
-                    <span
-                      data-testid={`account-projected-balance-${acc.id}`}
-                      className="font-mono tabular-nums font-extrabold text-emerald-600 dark:text-emerald-400"
-                    >
-                      {formatMoney(projection.projectedBalanceAfterDebit)}
-                    </span>
-                  </div>
+                  {isLoanCard ? (
+                    <>
+                      <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                        <span>EMI Given by Bank:</span>
+                        <span
+                          data-testid={`account-loan-bank-emi-${acc.id}`}
+                          className="font-mono tabular-nums font-extrabold text-indigo-600 dark:text-indigo-400"
+                        >
+                          {acc.bankGivenEmi && acc.bankGivenEmi > 0
+                            ? `${formatMoney(acc.bankGivenEmi)} / mo`
+                            : 'Not Set'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between pt-1.5 border-t border-slate-200/80 dark:border-slate-800">
+                        <span className="font-bold text-slate-700 dark:text-slate-300">
+                          Sanctioned Principal:
+                        </span>
+                        <span
+                          data-testid={`account-loan-sanctioned-${acc.id}`}
+                          className="font-mono tabular-nums font-extrabold text-slate-900 dark:text-white"
+                        >
+                          {formatMoney(
+                            acc.sanctionedLoanAmount !== undefined
+                              ? acc.sanctionedLoanAmount
+                              : Math.abs(acc.initialBalance)
+                          )}
+                        </span>
+                      </div>
+                      {acc.connectedLoanRecordId && (
+                        <div
+                          data-testid={`account-loan-connected-badge-${acc.id}`}
+                          className="pt-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          <span>Connected to Loans &amp; EMI Amortization</span>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                        <span>Upcoming Recurring Debits ({projection.pendingItemsCount}):</span>
+                        <span className="font-mono tabular-nums font-bold text-amber-600 dark:text-amber-400">
+                          -{formatMoney(projection.willBeDebitedTotal)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between pt-1.5 border-t border-slate-200/80 dark:border-slate-800">
+                        <span className="font-bold text-slate-700 dark:text-slate-300">
+                          Projected Balance After Debit:
+                        </span>
+                        <span
+                          data-testid={`account-projected-balance-${acc.id}`}
+                          className="font-mono tabular-nums font-extrabold text-emerald-600 dark:text-emerald-400"
+                        >
+                          {formatMoney(projection.projectedBalanceAfterDebit)}
+                        </span>
+                      </div>
+                    </>
+                  )}
                   {(acc.branchName || acc.bankDetails) && (
                     <div className="pt-1 text-[11px] text-slate-400 truncate">
                       {acc.branchName} {acc.bankDetails ? `· ${acc.bankDetails}` : ''}

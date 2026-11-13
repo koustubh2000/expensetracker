@@ -790,29 +790,37 @@ export function parseHeroImagesPayload(raw: string | null | undefined): string[]
 }
 
 export function serializeHeroImagesPayload(images: string[]): string {
-  const clean = (images || []).filter((x) => typeof x === 'string' && x.length > 0);
+  const clean = (images || []).filter((x) => typeof x === 'string' && x.trim().length > 0);
   if (clean.length === 0) return '';
-  if (clean.length === 1) return clean[0].slice(0, 750000);
-  // Fit as many photos as fit safely within Firestore's document limit alongside pdfHeaderJson
-  const fitting: string[] = [];
-  for (const img of clean) {
-    const candidate = JSON.stringify([...fitting, img]);
-    if (candidate.length <= 750000) {
-      fitting.push(img);
-    }
-  }
-  return fitting.length > 0 ? JSON.stringify(fitting) : '';
+  return JSON.stringify(clean);
 }
 
 export function saveLandingHeroImage(dataUrl: string | null, markLocalChange = true): void {
   try {
     const parsed = parseHeroImagesPayload(dataUrl);
-    // Remove legacy duplicate key so hero images are never stored twice in localStorage
     localStorage.removeItem(LANDING_HERO_IMAGE_KEY);
     if (parsed.length > 0) {
-      localStorage.setItem(LANDING_HERO_IMAGES_ARRAY_KEY, JSON.stringify(parsed));
+      try {
+        localStorage.setItem(LANDING_HERO_IMAGES_ARRAY_KEY, JSON.stringify(parsed));
+      } catch {
+        // Fallback if single localStorage item is large: store per-slide keys
+        localStorage.setItem(`${LANDING_HERO_IMAGES_ARRAY_KEY}_count`, String(parsed.length));
+        parsed.forEach((slide, idx) => {
+          try {
+            localStorage.setItem(`${LANDING_HERO_IMAGES_ARRAY_KEY}_slide_${idx}`, slide);
+          } catch {
+            // ignore
+          }
+        });
+      }
     } else {
       localStorage.removeItem(LANDING_HERO_IMAGES_ARRAY_KEY);
+      const oldCount =
+        Number(localStorage.getItem(`${LANDING_HERO_IMAGES_ARRAY_KEY}_count`)) || 0;
+      for (let i = 0; i < Math.max(oldCount, 10); i++) {
+        localStorage.removeItem(`${LANDING_HERO_IMAGES_ARRAY_KEY}_slide_${i}`);
+      }
+      localStorage.removeItem(`${LANDING_HERO_IMAGES_ARRAY_KEY}_count`);
     }
     if (markLocalChange) {
       setLocalGlobalConfigUpdatedAt(Date.now());
@@ -833,20 +841,8 @@ export function loadLandingHeroImage(): string | null {
 }
 
 export function saveLandingHeroImages(images: string[], markLocalChange = true): void {
-  try {
-    const clean = (images || []).filter(Boolean);
-    localStorage.removeItem(LANDING_HERO_IMAGE_KEY);
-    if (clean.length > 0) {
-      localStorage.setItem(LANDING_HERO_IMAGES_ARRAY_KEY, JSON.stringify(clean));
-    } else {
-      localStorage.removeItem(LANDING_HERO_IMAGES_ARRAY_KEY);
-    }
-    if (markLocalChange) {
-      setLocalGlobalConfigUpdatedAt(Date.now());
-    }
-  } catch {
-    // ignore quota errors
-  }
+  const serialized = serializeHeroImagesPayload(images);
+  saveLandingHeroImage(serialized || null, markLocalChange);
 }
 
 export function loadLandingHeroImages(): string[] {
@@ -855,6 +851,15 @@ export function loadLandingHeroImages(): string[] {
     if (rawArr) {
       const parsed = parseHeroImagesPayload(rawArr);
       if (parsed.length > 0) return parsed;
+    }
+    const count = Number(localStorage.getItem(`${LANDING_HERO_IMAGES_ARRAY_KEY}_count`)) || 0;
+    if (count > 0) {
+      const slides: string[] = [];
+      for (let i = 0; i < count; i++) {
+        const s = localStorage.getItem(`${LANDING_HERO_IMAGES_ARRAY_KEY}_slide_${i}`);
+        if (s && s.trim()) slides.push(s);
+      }
+      if (slides.length > 0) return slides;
     }
     const single = localStorage.getItem(LANDING_HERO_IMAGE_KEY);
     if (single) return parseHeroImagesPayload(single);

@@ -2362,7 +2362,6 @@ export function calculateLoanAmortizationSchedule(loan: LoanRecord): LoanAmortiz
     : undefined;
 
   const hasCustomEmi =
-    isInProgress &&
     loan.customSuggestedEmi !== undefined &&
     loan.customSuggestedEmi !== null &&
     !Number.isNaN(Number(loan.customSuggestedEmi)) &&

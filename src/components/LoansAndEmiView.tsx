@@ -118,6 +118,7 @@ export const LoansAndEmiView: React.FC<LoansAndEmiViewProps> = ({
   const [tenureUnit, setTenureUnit] = useState<'Months' | 'Years'>('Months');
   const [startDate, setStartDate] = useState('2026-01-10');
   const [linkedAccountId, setLinkedAccountId] = useState<string>(accounts[0]?.id || '');
+  const [connectedLoanAccountId, setConnectedLoanAccountId] = useState<string>('');
   const [loanStatus, setLoanStatus] = useState<LoanStatus>('About to Start');
   const [initialPaidEmisCount, setInitialPaidEmisCount] = useState('0');
   const [initialPrepaymentAmount, setInitialPrepaymentAmount] = useState('0');
@@ -128,6 +129,12 @@ export const LoansAndEmiView: React.FC<LoansAndEmiViewProps> = ({
   const [customSuggestedEmiInput, setCustomSuggestedEmiInput] = useState<string>('');
 
   const [formError, setFormError] = useState('');
+
+  // Loan Account cards created in the Accounts section that can be connected to this Amortization schedule
+  const loanAccountCards = useMemo(
+    () => accounts.filter((a) => a.type === 'Loan Account'),
+    [accounts]
+  );
 
   // Account-Linked EMI Payment Confirmation Modal State
   const [payingRow, setPayingRow] = useState<AmortizationRow | null>(null);
@@ -146,6 +153,50 @@ export const LoansAndEmiView: React.FC<LoansAndEmiViewProps> = ({
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}`;
+
+  const handleConnectLoanAccountSelect = (loanAccId: string) => {
+    setConnectedLoanAccountId(loanAccId);
+    if (!loanAccId) return;
+    const loanAcc = accounts.find((a) => a.id === loanAccId);
+    if (!loanAcc) return;
+
+    if (!loanName.trim() || loanCategoryList.options.includes(loanName.trim() as LoanCategory)) {
+      setLoanName(loanAcc.name);
+    }
+    const statusFromAcc: LoanStatus = loanAcc.loanStatus || 'In Progress';
+    setLoanStatus(statusFromAcc);
+
+    const sanctioned =
+      loanAcc.sanctionedLoanAmount && loanAcc.sanctionedLoanAmount > 0
+        ? loanAcc.sanctionedLoanAmount
+        : loanAcc.currentRemainingLoanAmount && loanAcc.currentRemainingLoanAmount > 0
+        ? loanAcc.currentRemainingLoanAmount
+        : Math.abs(loanAcc.initialBalance || 0);
+    if (sanctioned > 0) {
+      setPrincipalAmount(String(sanctioned));
+    }
+
+    const rem =
+      loanAcc.currentRemainingLoanAmount !== undefined
+        ? loanAcc.currentRemainingLoanAmount
+        : Math.abs(loanAcc.initialBalance || 0);
+    if (statusFromAcc === 'In Progress' && rem >= 0) {
+      setCurrentRemainingAmountInput(String(rem));
+    } else if (statusFromAcc === 'About to Start') {
+      setCurrentRemainingAmountInput('');
+    }
+
+    if (loanAcc.bankGivenEmi !== undefined && loanAcc.bankGivenEmi > 0) {
+      setCustomSuggestedEmiInput(String(loanAcc.bankGivenEmi));
+    }
+    if (loanAcc.loanInterestRate !== undefined && loanAcc.loanInterestRate >= 0) {
+      setInterestRateAnnual(String(loanAcc.loanInterestRate));
+    }
+    if (loanAcc.loanTenureMonths !== undefined && loanAcc.loanTenureMonths > 0) {
+      setTenureUnit('Months');
+      setTenureValue(String(loanAcc.loanTenureMonths));
+    }
+  };
 
   const activeLoan = useMemo(() => {
     return (
@@ -232,14 +283,13 @@ export const LoansAndEmiView: React.FC<LoansAndEmiViewProps> = ({
 
   const liveFormEmiPreview = useMemo(() => {
     if (
-      (loanStatus === 'In Progress' || loanType === 'person_org_no_tenure') &&
       customSuggestedEmiInput.trim() !== '' &&
       Number(customSuggestedEmiInput) > 0
     ) {
       return Math.round(Number(customSuggestedEmiInput) * 100) / 100;
     }
     return liveFormulaSuggestedEmi;
-  }, [loanStatus, loanType, customSuggestedEmiInput, liveFormulaSuggestedEmi]);
+  }, [customSuggestedEmiInput, liveFormulaSuggestedEmi]);
 
   const openNewLoanForm = (initialType: LoanStructureType = 'proper_emi') => {
     if (readOnlyMode) return;
@@ -254,7 +304,9 @@ export const LoansAndEmiView: React.FC<LoansAndEmiViewProps> = ({
     setTenureValue('24');
     setTenureUnit('Months');
     setStartDate('2026-01-10');
-    setLinkedAccountId(accounts[0]?.id || '');
+    const defaultDebitAcc = accounts.find((a) => a.type !== 'Loan Account') || accounts[0];
+    setLinkedAccountId(defaultDebitAcc?.id || '');
+    setConnectedLoanAccountId('');
     setLoanStatus(initialType === 'person_org_no_tenure' ? 'In Progress' : 'About to Start');
     setInitialPaidEmisCount('0');
     setInitialPrepaymentAmount('0');
@@ -284,6 +336,7 @@ export const LoansAndEmiView: React.FC<LoansAndEmiViewProps> = ({
     );
     setStartDate(loan.startDate || '2026-01-10');
     setLinkedAccountId(loan.linkedAccountId || accounts[0]?.id || '');
+    setConnectedLoanAccountId(loan.connectedLoanAccountId || '');
     setLoanStatus(loan.status);
     setInitialPaidEmisCount(String(loan.initialPaidEmisCount || 0));
     setInitialPrepaymentAmount(String(loan.initialPrepaymentAmount || 0));
@@ -346,7 +399,6 @@ export const LoansAndEmiView: React.FC<LoansAndEmiViewProps> = ({
         ? Math.max(0, Number(totalAmountAlreadyPaidInput))
         : undefined;
     const parsedCustomEmi =
-      (effectiveStatus === 'In Progress' || isFlexibleNoTenure) &&
       customSuggestedEmiInput.trim() !== '' &&
       Number(customSuggestedEmiInput) > 0
         ? Math.max(0, Number(customSuggestedEmiInput))
@@ -368,6 +420,7 @@ export const LoansAndEmiView: React.FC<LoansAndEmiViewProps> = ({
       tenureUnit: isFlexibleNoTenure ? 'Months' : tenureUnit,
       startDate: startDate || '2026-01-10',
       linkedAccountId: linkedAccountId || accounts[0]?.id || '',
+      connectedLoanAccountId: connectedLoanAccountId || undefined,
       status: effectiveStatus,
       initialPaidEmisCount:
         !isFlexibleNoTenure && effectiveStatus === 'In Progress'
@@ -1233,6 +1286,64 @@ export const LoansAndEmiView: React.FC<LoansAndEmiViewProps> = ({
 
           {loanType === 'proper_emi' ? (
             <>
+              {/* Connect Loan Account from Accounts Section */}
+              <div
+                data-testid="connect-loan-account-box"
+                className="p-3.5 rounded-xl bg-indigo-500/5 border border-indigo-500/30 space-y-2"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <label
+                      htmlFor="connect-loan-account-select"
+                      className="block text-xs font-extrabold text-indigo-800 dark:text-indigo-300"
+                    >
+                      Connect Loan Account from Accounts Section (Optional — Auto-Syncs Balance &amp; Bank EMI)
+                    </label>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Select any Loan Account card from your Accounts tab to auto-fill its status, remaining balance, and Bank EMI, and keep both synced automatically.
+                    </p>
+                  </div>
+                  {connectedLoanAccountId && (
+                    <span className="px-2.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[10px] font-extrabold">
+                      Connected to Accounts Card
+                    </span>
+                  )}
+                </div>
+
+                <select
+                  id="connect-loan-account-select"
+                  data-testid="connect-loan-account-select"
+                  value={connectedLoanAccountId}
+                  onChange={(e) => handleConnectLoanAccountSelect(e.target.value)}
+                  className="w-full px-3.5 py-2 text-xs font-semibold rounded-lg border border-indigo-500/40 bg-white dark:bg-slate-950"
+                >
+                  <option value="">
+                    -- Not Connected / Standalone Loan Amortization Schedule --
+                  </option>
+                  {loanAccountCards.map((loanAcc) => {
+                    const remVal =
+                      loanAcc.currentRemainingLoanAmount !== undefined
+                        ? loanAcc.currentRemainingLoanAmount
+                        : Math.abs(calculateAccountBalance(loanAcc, transactions));
+                    const statusBadge = loanAcc.loanStatus || 'In Progress';
+                    const emiLabel =
+                      loanAcc.bankGivenEmi && loanAcc.bankGivenEmi > 0
+                        ? ` · Bank EMI: ${formatMoney(loanAcc.bankGivenEmi)}/mo`
+                        : '';
+                    return (
+                      <option key={loanAcc.id} value={loanAcc.id}>
+                        {loanAcc.name} ({maskAccountNumber(loanAcc.accountNumber)}) — [{statusBadge}] Remaining: {formatMoney(remVal)}{emiLabel}
+                      </option>
+                    );
+                  })}
+                </select>
+                {loanAccountCards.length === 0 && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                    Tip: You can add a &ldquo;Loan Account&rdquo; card in the Accounts tab (with Current Status, Remaining Loan Balance &amp; Bank EMI) and connect it here anytime.
+                  </p>
+                )}
+              </div>
+
               {/* Loan Category Selector Pills */}
               <div>
                 <div className="flex items-center justify-between gap-2 mb-2">
@@ -1363,6 +1474,22 @@ export const LoansAndEmiView: React.FC<LoansAndEmiViewProps> = ({
                       <option value="Years">Years</option>
                     </select>
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    EMI Given by Bank ({currency} — Optional Override)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    data-testid="loan-bank-emi-override-input"
+                    value={customSuggestedEmiInput}
+                    onChange={(e) => setCustomSuggestedEmiInput(e.target.value)}
+                    placeholder={`Auto-Calculated: ${liveFormulaSuggestedEmi}`}
+                    className="w-full px-3.5 py-2 text-xs font-mono tabular-nums rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950"
+                  />
                 </div>
 
                 <div>
@@ -1796,6 +1923,31 @@ export const LoansAndEmiView: React.FC<LoansAndEmiViewProps> = ({
               {/* Active Loan KPI Summary + Charts + Schedule */}
               {activeLoan && activeSchedule && (
                 <div className="space-y-4">
+                  {activeLoan.connectedLoanAccountId && (() => {
+                    const connAcc = accounts.find(
+                      (a) => a.id === activeLoan.connectedLoanAccountId
+                    );
+                    if (!connAcc) return null;
+                    return (
+                      <div
+                        data-testid="active-loan-connected-account-badge"
+                        className="px-4 py-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex flex-wrap items-center justify-between gap-2"
+                      >
+                        <div className="flex items-center gap-2 text-xs font-extrabold text-indigo-800 dark:text-indigo-200">
+                          <Landmark className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                          <span>
+                            Connected to Accounts Card: {connAcc.name} ({maskAccountNumber(connAcc.accountNumber)})
+                          </span>
+                          <span className="px-2 py-0.5 rounded bg-indigo-600 text-white text-[10px] uppercase">
+                            {activeLoan.status}
+                          </span>
+                        </div>
+                        <span className="text-[11px] font-mono font-bold text-indigo-700 dark:text-indigo-300">
+                          Synced Remaining Balance: {formatMoney(activeSchedule.remainingBalance)} · Bank EMI: {formatMoney(activeSchedule.scheduledMonthlyEmi)}/mo
+                        </span>
+                      </div>
+                    );
+                  })()}
                   {/* 4 KPI Cards */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                     <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">

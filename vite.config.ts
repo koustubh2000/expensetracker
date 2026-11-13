@@ -15,6 +15,11 @@ interface CloudMirrorStore {
   users: any[];
   deletedUserIds: string[];
   vaults: Record<string, any>;
+  globalConfig?: {
+    landingHeroImage?: string | null;
+    pdfHeaderConfig?: any;
+    updatedAt?: number;
+  };
 }
 
 function loadMirrorStore(): CloudMirrorStore {
@@ -27,6 +32,10 @@ function loadMirrorStore(): CloudMirrorStore {
           users: parsed.users,
           deletedUserIds: Array.isArray(parsed.deletedUserIds) ? parsed.deletedUserIds : [],
           vaults: parsed.vaults,
+          globalConfig:
+            parsed.globalConfig && typeof parsed.globalConfig === 'object'
+              ? parsed.globalConfig
+              : undefined,
         };
       }
     }
@@ -90,8 +99,18 @@ function cloudVaultMirrorPlugin(): Plugin {
                 store.users = store.users.filter((u: any) => u && u.id !== delId);
                 delete store.vaults[delId];
               }
-              if (payload.userId && payload.vault) {
-                store.vaults[payload.userId] = payload.vault;
+              const targetVaultUserId =
+                (typeof payload.userId === 'string' && payload.userId) ||
+                (payload.vault && typeof payload.vault.userId === 'string' && payload.vault.userId);
+              if (targetVaultUserId && payload.vault) {
+                store.vaults[targetVaultUserId] = payload.vault;
+              }
+              if (payload.globalConfig && typeof payload.globalConfig === 'object') {
+                store.globalConfig = {
+                  ...(store.globalConfig || {}),
+                  ...payload.globalConfig,
+                  updatedAt: payload.globalConfig.updatedAt || Date.now(),
+                };
               }
               saveMirrorStore(store);
               res.setHeader('Content-Type', 'application/json');

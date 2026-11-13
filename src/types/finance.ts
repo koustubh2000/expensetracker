@@ -33,6 +33,14 @@ export interface WalletAccount {
   initialBalance: number;
   color: string;
   includeInNetWorth: boolean;
+  /** Loan Account specific fields (when type === 'Loan Account') */
+  loanStatus?: LoanStatus;
+  sanctionedLoanAmount?: number;
+  currentRemainingLoanAmount?: number;
+  bankGivenEmi?: number;
+  loanInterestRate?: number;
+  loanTenureMonths?: number;
+  connectedLoanRecordId?: string;
 }
 
 export interface TransactionRecord {
@@ -261,6 +269,8 @@ export interface LoanRecord {
   tenureUnit?: 'Months' | 'Years';
   startDate: string; // YYYY-MM-DD
   linkedAccountId: string;
+  /** Optional ID of the Loan Account card from the Accounts section connected to this Loan Amortization schedule */
+  connectedLoanAccountId?: string;
   status: LoanStatus;
   initialPaidEmisCount?: number; // Pre-existing paid EMIs when created as In Progress
   initialPrepaymentAmount?: number; // Custom partial / lump-sum prepayment already paid
